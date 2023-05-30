@@ -75,7 +75,6 @@ public enum DayLight {
     }
 
     public float getCurrentPitch(LocalTime currentTime, int dayLength) {
-        //LocalTime currentTimeOfDay = LocalTime.of(currentTime / 60, currentTime % 60);
         return getLightDirection(currentTime, dayLength) * 360 + 90;
     }
 
