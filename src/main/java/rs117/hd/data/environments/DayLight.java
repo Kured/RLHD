@@ -2,20 +2,17 @@ package rs117.hd.data.environments;
 
 import lombok.extern.slf4j.Slf4j;
 
+import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalTime;
-
-
 
 @Slf4j
 public enum DayLight {
 
-    DAY(LocalTime.of(7, 0), true),
-    NIGHT(LocalTime.of(17, 0), false);
+    DAY(7 * 3600, true),
+    NIGHT(17 * 3600, false);
 
-    private LocalTime startTime;
+    private int startTimeSeconds;
     private boolean shadowsEnabled;
-
 
     /**
      * This is a season(month) based changed.
@@ -25,10 +22,8 @@ public enum DayLight {
     private static final int START_YAW = -45;
     private static final int END_YAW = -135;
 
-    //private static final int DAY_LENGTH = 1; // The length of a day in minutes (if no config)
-
-    DayLight(LocalTime startTime, boolean shadowsEnabled) {
-        this.startTime = startTime;
+    DayLight(int startTimeSeconds, boolean shadowsEnabled) {
+        this.startTimeSeconds = startTimeSeconds;
         this.shadowsEnabled = shadowsEnabled;
     }
 
@@ -36,36 +31,28 @@ public enum DayLight {
         return shadowsEnabled;
     }
 
-    public static DayLight getTimeOfDay(LocalTime currentTimeOfDay, int dayLength) {
+    public static DayLight getTimeOfDay(Instant currentTime, int dayLength) {
+        long currentTimeSeconds = currentTime.getEpochSecond() % (dayLength * 60L);
 
-        int currentTime = timeToSecondsInt(currentTimeOfDay) % (dayLength * 60);
+        float start = (float) DAY.startTimeSeconds / (24 * 3600);
+        float end = (float) NIGHT.startTimeSeconds / (24 * 3600);
+        float time = (float) currentTimeSeconds / (60 * dayLength);
 
-        float start = (float)DAY.startTime.getHour() / 24;
-        float end = (float)NIGHT.startTime.getHour() / 24;
-        float time = (float)currentTime / 60 / dayLength;
-
-        if ( time >= start && time < end ) {
+        if (time >= start && time < end) {
             return DayLight.DAY;
-        }
-        else
-        {
+        } else {
             return DayLight.NIGHT;
         }
     }
 
-    private float getLightDirection(LocalTime currentTimeOfDay, int dayLength) {
-
-        return getTimeFloat(currentTimeOfDay, dayLength);
+    private float getLightDirection(Instant currentTime, int dayLength) {
+        return getTimeFloat(currentTime, dayLength);
     }
 
-    private float getTimeFloat(LocalTime currentTimeOfDay , int dayLength) {
-        int currentTime = timeToMillisecondsInt(currentTimeOfDay) % (dayLength * 60 * 1000);
+    private float getTimeFloat(Instant currentTime, int dayLength) {
+        long currentTimeMillis = currentTime.toEpochMilli() % ((long) dayLength * 60 * 1000);
 
-        float time = (float)currentTime / 60 / 1000 / dayLength;
-
-        float dayTime = 12/24f;
-
-        return time;
+        return (float) currentTimeMillis / (60 * 1000 * dayLength);
     }
 
     private float percentageOfSeason(LocalDate currentDate) {
@@ -74,7 +61,7 @@ public enum DayLight {
         return normalizedMonth / 6;
     }
 
-    public float getCurrentPitch(LocalTime currentTime, int dayLength) {
+    public float getCurrentPitch(Instant currentTime, int dayLength) {
         return getLightDirection(currentTime, dayLength) * 360 + 90;
     }
 
@@ -82,15 +69,15 @@ public enum DayLight {
         return percentageOfSeason(currentDate) * (END_YAW - START_YAW) + START_YAW;
     }
 
-    public static int timeToSecondsInt(LocalTime time) {
-        return time.getHour() * 3600 + time.getMinute() * 60 + time.getSecond();
+    public static int timeToSecondsInt(Instant time) {
+        return (int) (time.getEpochSecond() % (24 * 3600));
     }
 
-    public static int timeToMillisecondsInt(LocalTime time) {
-        return time.getHour() * 3600 * 1000 + time.getMinute() * 60 * 1000 + time.getSecond() * 1000 + time.getNano() / 1000000;
+    public static int timeToMillisecondsInt(Instant time) {
+        return (int) (time.toEpochMilli() % (24 * 3600 * 1000));
     }
 
-    public static float timeScaled(LocalTime time) {
+    public static float timeScaled(Instant time) {
         return timeToSecondsInt(time) / 86400f;
     }
 

@@ -41,7 +41,7 @@ import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.time.LocalDate;
-import java.time.LocalTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
@@ -1808,16 +1808,23 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			int normalBuffer = hRenderBufferNormals.glBufferId;
 
 			float[] lightProjectionMatrix = Mat4.identity();
-			float lightPitch = environmentManager.currentLightPitch;
-			float lightYaw = environmentManager.currentLightYaw;
+			float lightPitch;
+			float lightYaw;
 
 			boolean shadowsAvailable = true;
 			if(configDayNightEnabled) {
 				DayLight timeOfDay = environmentManager.currentTimeOfDay;
-				lightPitch = timeOfDay.getCurrentPitch(LocalTime.now(), config.dayLength());
+
+				lightPitch = timeOfDay.getCurrentPitch(Instant.now(), config.dayLength());
+
 				lightYaw = timeOfDay.getCurrentYaw(CURRENT_DATE);
 
 				shadowsAvailable = timeOfDay.isShadowsEnabled();
+			}
+			else
+			{
+				lightPitch = environmentManager.currentLightPitch;
+				lightYaw = environmentManager.currentLightYaw;
 			}
 
 			if (configShadowsEnabled && fboShadowMap != 0 && environmentManager.currentDirectionalStrength > 0.0f)

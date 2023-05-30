@@ -25,7 +25,7 @@
 package rs117.hd.scene;
 
 
-import java.time.LocalTime;
+import java.time.Instant;
 import java.util.Arrays;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -59,9 +59,6 @@ public class EnvironmentManager
 
 	private final Environment defaultEnvironment = Environment.OVERWORLD;
 	private Environment currentEnvironment = defaultEnvironment;
-
-	private static final LocalTime SUNRISE = LocalTime.of(7, 0);
-	private static final LocalTime SUNSET = LocalTime.of(23, 0);
 
 	// transition time
 	private static final int TRANSITION_DURATION = 3000;
@@ -145,7 +142,7 @@ public class EnvironmentManager
 	private float targetLightYaw = 0f;
 
 	private boolean lightningEnabled = false;
-	public DayLight currentTimeOfDay = DayLight.getTimeOfDay(LocalTime.now(), 1);
+	public DayLight currentTimeOfDay = DayLight.getTimeOfDay(Instant.now(), 1);
 	private boolean isOverworld = false;
 	// some necessary data for reloading the scene while in POH to fix major performance loss
 	private boolean isInHouse = false;
@@ -167,7 +164,7 @@ public class EnvironmentManager
 	{
 		isOverworld = Area.OVERWORLD.containsPoint(position);
 
-		currentTimeOfDay = DayLight.getTimeOfDay(LocalTime.now(), config.dayLength());
+		currentTimeOfDay = config.dayNight() ? DayLight.getTimeOfDay(Instant.now(), config.dayLength()) : DayLight.DAY;
 
 		// skip the transitional fade if the player has moved too far
 		// since the previous frame. results in an instant transition when
@@ -208,10 +205,7 @@ public class EnvironmentManager
 
 					plugin.setInGauntlet(environment == Environment.THE_GAUNTLET || environment == Environment.THE_GAUNTLET_CORRUPTED);
 
-					if(config.enableEnvironmentDebug())
-						changeEnvironment(config.environment(), skipTransition);
-					else
-						changeEnvironment(environment, skipTransition);
+					changeEnvironment(environment, skipTransition);
 				}
 				break;
 			}
