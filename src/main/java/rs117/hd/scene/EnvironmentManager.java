@@ -208,10 +208,7 @@ public class EnvironmentManager
 
 					plugin.setInGauntlet(environment == Environment.THE_GAUNTLET || environment == Environment.THE_GAUNTLET_CORRUPTED);
 
-					if(config.enableEnvironmentDebug())
-						changeEnvironment(config.environment(), skipTransition);
-					else
-						changeEnvironment(environment, skipTransition);
+					changeEnvironment(environment, skipTransition);
 				}
 				break;
 			}

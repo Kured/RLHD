@@ -433,29 +433,6 @@ public interface HdPluginConfig extends Config
 	String environmentSettings = "environmentSettings";
 
 	@ConfigItem(
-		keyName = "enableEnvironmentDebug",
-		name = "EnvironmentDebug",
-		description = "Enables custom environments",
-		position = 204,
-		section = environmentSettings
-	)
-	default boolean enableEnvironmentDebug()
-	{
-		return true;
-	}
-	@ConfigItem(
-		keyName = "environment",
-		name = "Environment",
-		description = "Select environment",
-		position = 205,
-		section = environmentSettings
-	)
-	default Environment environment()
-	{
-		return Environment.OVERWORLD;
-	}
-
-	@ConfigItem(
 			keyName = "dayNight",
 			name = "Day/Night Cycle",
 			description = "Environmental lighting will be based on your local PC's time of day.",

@@ -306,7 +306,18 @@ public enum Environment
 		.setAmbientStrength(2.0f)
 		.setDirectionalColor("#F8BF68")
 		.setDirectionalStrength(2.0f)
-		.setGroundFog(-150, -350, 0.5f)
+		.setGroundFog(-150, -350, 0.5f),
+			DayLight.DAY
+	),
+	MORYTANIA_NIGHT(Area.MORYTANIA, new Properties()
+		.setFogColor("#0f1926")
+		.setFogDepth(40)
+		.setAmbientColor("#5A8CC0")
+		.setAmbientStrength(0.1f)
+		.setDirectionalColor("#F8BF68")
+		.setDirectionalStrength(0.2f)
+		.setGroundFog(-150, -350, 0.5f),
+			DayLight.NIGHT
 	),
 
 	LUMBRIDGE(Area.LUMBRIDGE, new Properties()),
