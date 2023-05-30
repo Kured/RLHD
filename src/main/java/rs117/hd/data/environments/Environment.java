@@ -1037,7 +1037,17 @@ public enum Environment
 			.setDirectionalStrength(1.5f)
 			.setLightDirection(260f, 10f)
 	),
-
+	OVERWORLD_NIGHT(Area.OVERWORLD, new Properties()
+			.setFogColor("#030303")
+			.setFogDepth(40)
+			.setAmbientColor("#AAAFB6")
+			.setAmbientStrength(0.1f)
+			.setDirectionalColor("#FFFFFF")
+			.setDirectionalStrength(.2f)
+			.setLightDirection(260f, 10f)
+			.setWaterColor(10, 12, 10),
+			DayLight.NIGHT
+	),
 	// overrides 'ALL' to provide default daylight conditions for the overworld area
 	OVERWORLD(Area.OVERWORLD, new Properties()),
 	// used for underground, instances, etc.
@@ -1049,7 +1059,8 @@ public enum Environment
 		.setDirectionalColor("#FFFFFF")
 		.setDirectionalStrength(1.0f)
 		.setLightDirection(260f, 10f)
-		.setWaterColor(102, 234, 255)
+		.setWaterColor(102, 234, 255),
+			DayLight.DAY
 	),
 
 	;
@@ -1081,6 +1092,7 @@ public enum Environment
 	private final float underwaterCausticsStrength;
 	private final float[] waterColor;
 	private final boolean customWaterColor;
+	private final DayLight timeOfDay;
 
 	private static class Properties
 	{
@@ -1260,8 +1272,11 @@ public enum Environment
 			return this;
 		}
 	}
-
 	Environment(Area area, Properties properties)
+	{
+		this(area, properties, DayLight.DAY);
+	}
+	Environment(Area area, Properties properties, DayLight timeOfDay)
 	{
 		this.area = area;
 		this.fogDepth = properties.fogDepth;
@@ -1292,5 +1307,6 @@ public enum Environment
 			properties.directionalStrength : properties.underwaterCausticsStrength;
 		this.waterColor = properties.waterColor;
 		this.customWaterColor = properties.customWaterColor;
+		this.timeOfDay = timeOfDay;
 	}
 }

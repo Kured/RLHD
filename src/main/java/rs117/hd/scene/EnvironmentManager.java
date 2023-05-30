@@ -24,9 +24,12 @@
  */
 package rs117.hd.scene;
 
+
+import java.time.LocalTime;
 import java.util.Arrays;
 import javax.inject.Inject;
 import javax.inject.Singleton;
+import jdk.vm.ci.meta.Local;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
@@ -36,6 +39,7 @@ import rs117.hd.HdPlugin;
 import rs117.hd.HdPluginConfig;
 import rs117.hd.config.DefaultSkyColor;
 import rs117.hd.data.environments.Area;
+import rs117.hd.data.environments.DayLight;
 import rs117.hd.data.environments.Environment;
 import rs117.hd.utils.AABB;
 import rs117.hd.utils.HDUtils;
@@ -55,6 +59,9 @@ public class EnvironmentManager
 
 	private final Environment defaultEnvironment = Environment.OVERWORLD;
 	private Environment currentEnvironment = defaultEnvironment;
+
+	private static final LocalTime SUNRISE = LocalTime.of(7, 0);
+	private static final LocalTime SUNSET = LocalTime.of(23, 0);
 
 	// transition time
 	private static final int TRANSITION_DURATION = 3000;
@@ -138,6 +145,7 @@ public class EnvironmentManager
 	private float targetLightYaw = 0f;
 
 	private boolean lightningEnabled = false;
+	public DayLight currentTimeOfDay = DayLight.getTimeOfDay(LocalTime.now(), 1);
 	private boolean isOverworld = false;
 	// some necessary data for reloading the scene while in POH to fix major performance loss
 	private boolean isInHouse = false;
@@ -159,6 +167,8 @@ public class EnvironmentManager
 	{
 		isOverworld = Area.OVERWORLD.containsPoint(position);
 
+		currentTimeOfDay = DayLight.getTimeOfDay(LocalTime.now(), config.dayLength());
+
 		// skip the transitional fade if the player has moved too far
 		// since the previous frame. results in an instant transition when
 		// teleporting, entering dungeons, etc.
@@ -179,9 +189,10 @@ public class EnvironmentManager
 		}
 
 		boolean skipTransition = tileChange >= SKIP_TRANSITION_DISTANCE;
+
 		for (Environment environment : sceneContext.environments)
 		{
-			if (environment.getArea().containsPoint(position))
+			if (environment.getArea().containsPoint(position) && environment.getTimeOfDay() == currentTimeOfDay)
 			{
 				if (environment != currentEnvironment)
 				{
@@ -197,7 +208,10 @@ public class EnvironmentManager
 
 					plugin.setInGauntlet(environment == Environment.THE_GAUNTLET || environment == Environment.THE_GAUNTLET_CORRUPTED);
 
-					changeEnvironment(environment, skipTransition);
+					if(config.enableEnvironmentDebug())
+						changeEnvironment(config.environment(), skipTransition);
+					else
+						changeEnvironment(environment, skipTransition);
 				}
 				break;
 			}
@@ -267,7 +281,7 @@ public class EnvironmentManager
 			return;
 
 		startTime = System.currentTimeMillis();
-		transitionCompleteTime = startTime + (skipTransition ? 0 : TRANSITION_DURATION);
+		transitionCompleteTime = startTime + (skipTransition ? 0 : config.dayNight() ? DayLight.getTransitionDuration(config.dayLength()) : TRANSITION_DURATION);
 
 		log.debug("changing environment from {} to {} (instant: {})", currentEnvironment, newEnvironment, skipTransition);
 		currentEnvironment = newEnvironment;

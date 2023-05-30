@@ -32,6 +32,10 @@ import static rs117.hd.HdPlugin.MAX_FOG_DEPTH;
 import static rs117.hd.HdPluginConfig.CONFIG_GROUP;
 
 import rs117.hd.config.*;
+import rs117.hd.data.environments.Environment;
+
+import java.sql.Time;
+import java.time.LocalTime;
 
 @ConfigGroup(CONFIG_GROUP)
 public interface HdPluginConfig extends Config
@@ -427,6 +431,80 @@ public interface HdPluginConfig extends Config
 		closedByDefault = false
 	)
 	String environmentSettings = "environmentSettings";
+
+	@ConfigItem(
+		keyName = "enableEnvironmentDebug",
+		name = "EnvironmentDebug",
+		description = "Enables custom environments",
+		position = 204,
+		section = environmentSettings
+	)
+	default boolean enableEnvironmentDebug()
+	{
+		return true;
+	}
+	@ConfigItem(
+		keyName = "environment",
+		name = "Environment",
+		description = "Select environment",
+		position = 205,
+		section = environmentSettings
+	)
+	default Environment environment()
+	{
+		return Environment.OVERWORLD;
+	}
+
+	@ConfigItem(
+			keyName = "dayNight",
+			name = "Day/Night Cycle",
+			description = "Environmental lighting will be based on your local PC's time of day.",
+			position = 209,
+			section = environmentSettings
+	)
+	default boolean dayNight()
+	{
+		return false;
+	}
+
+	// day length
+	@Range(min = 1, max = 60)
+	@ConfigItem(
+			keyName = "dayLength",
+			name = "Day Length",
+			description = "Set the length of the day in minutes.",
+			position = 210,
+			section = environmentSettings
+	)
+	default int dayLength()
+	{
+		return 2;
+	}
+
+	@ConfigItem(
+			keyName = "setTime",
+			name = "Set Time",
+			description = "Enables setting the time of day.",
+			position = 211,
+			section = environmentSettings
+	)
+	default boolean setTime()
+	{
+		return false;
+	}
+
+	@Range(max = 1439)
+	@ConfigItem(
+			keyName = "time",
+			name = "Time",
+			description = "Set the time of day in hours.",
+			position = 212,
+			section = "environmentSettings"
+	)
+	default int time()
+	{
+		return 12;
+	}
 
 	@ConfigItem(
 		keyName = "fogDepthMode",
