@@ -458,31 +458,6 @@ public interface HdPluginConfig extends Config
 	}
 
 	@ConfigItem(
-			keyName = "setTime",
-			name = "Set Time",
-			description = "Enables setting the time of day.",
-			position = 211,
-			section = environmentSettings
-	)
-	default boolean setTime()
-	{
-		return false;
-	}
-
-	@Range(max = 1439)
-	@ConfigItem(
-			keyName = "time",
-			name = "Time",
-			description = "Set the time of day in hours.",
-			position = 212,
-			section = "environmentSettings"
-	)
-	default int time()
-	{
-		return 12;
-	}
-
-	@ConfigItem(
 		keyName = "fogDepthMode",
 		name = "Fog Depth Mode",
 		description =

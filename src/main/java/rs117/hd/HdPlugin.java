@@ -1814,7 +1814,9 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			boolean shadowsAvailable = true;
 			if(configDayNightEnabled) {
 				DayLight timeOfDay = environmentManager.currentTimeOfDay;
+
 				lightPitch = timeOfDay.getCurrentPitch(Instant.now(), config.dayLength());
+
 				lightYaw = timeOfDay.getCurrentYaw(CURRENT_DATE);
 
 				shadowsAvailable = timeOfDay.isShadowsEnabled();
