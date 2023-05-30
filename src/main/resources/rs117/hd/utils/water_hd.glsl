@@ -170,7 +170,7 @@ vec4 sampleWater(int waterTypeIndex, float depth, vec3 viewDir) {
         alpha = max(waterType.baseOpacity, max(foamAmount, max(finalFresnel, length(specularComposite / 3))));
     }
 
-    return vec4(vec3(translateRange(0, 500, depth)), alpha);
+    return vec4(baseColor, alpha); //vec3(translateRange(0, 500, depth))
 }
 
 void sampleUnderwater(inout vec3 outputColor, WaterType waterType, float depth, float lightDotNormals) {
