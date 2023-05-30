@@ -96,7 +96,7 @@ vec2 worldUvs(float scale) {
 #include utils/specular.glsl
 #include utils/displacement.glsl
 #include utils/shadows.glsl
-#include utils/water.glsl
+#include utils/water_hd.glsl
 
 void main() {
     vec3 camPos = vec3(cameraX, cameraY, cameraZ);
@@ -135,7 +135,7 @@ void main() {
     vec4 outputColor = vec4(1);
 
     if (isWater) {
-        outputColor = sampleWater(waterTypeIndex, viewDir);
+        outputColor = sampleWater(waterTypeIndex, waterDepth, viewDir);
     } else {
         // Source: https://www.geeks3d.com/20130122/normal-mapping-without-precomputed-tangent-space-vectors/
         vec3 N = IN.normal;
