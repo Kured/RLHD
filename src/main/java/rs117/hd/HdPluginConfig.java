@@ -35,7 +35,6 @@ import rs117.hd.config.*;
 import rs117.hd.data.environments.Environment;
 
 import java.sql.Time;
-import java.time.LocalTime;
 
 @ConfigGroup(CONFIG_GROUP)
 public interface HdPluginConfig extends Config
