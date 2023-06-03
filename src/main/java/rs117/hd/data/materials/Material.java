@@ -585,6 +585,14 @@ public enum Material
 			return this;
 		}
 
+		Builder setSpecular(float specularStrength, Material specularMap)
+		{
+			this.specularStrength = specularStrength;
+			this.specularGloss = 0;
+			//this.specularMap = specularMap;
+			return this;
+		}
+
 		Builder setFlowMap(Material flowMap, float flowMapStrength, float durationX, float durationY)
 		{
 			this.flowMap = flowMap;

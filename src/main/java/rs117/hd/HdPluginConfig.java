@@ -599,6 +599,17 @@ public interface HdPluginConfig extends Config
 		return true;
 	}
 
+	@ConfigItem(
+			keyName = "useSkybox",
+			name = "Use Skybox",
+			description = "Enables cubemap HDRI skyboxes.",
+			position = 12,
+			section = environmentSettings
+	)
+	default boolean useSkybox()
+	{
+		return true;
+	}
 
 	/*====== Model caching settings ======*/
 
@@ -653,13 +664,36 @@ public interface HdPluginConfig extends Config
 		return 2048;
 	}
 
+	/*====== Post Processing settings ======*/
+	@ConfigSection(
+			name = "Post Processing",
+			description = "Post Processing settings",
+			position = 4,
+			closedByDefault = true
+	)
+	String postprocessingSettings = "postprocessingSettings";
+
+	@ConfigItem(
+			keyName = "enablePostProcessing",
+			name = "Enable Post Processing",
+			description = "Enables post processing effects.",
+			warning =
+					"This setting may cause decreased performance.",
+			position = 1,
+			section = postprocessingSettings
+	)
+	default boolean enablePostProcessing()
+	{
+		return false;
+	}
+
 
 	/*====== Miscellaneous settings ======*/
 
 	@ConfigSection(
 		name = "Miscellaneous",
 		description = "Miscellaneous settings",
-		position = 4,
+		position = 5,
 		closedByDefault = true
 	)
 	String miscellaneousSettings = "miscellaneousSettings";

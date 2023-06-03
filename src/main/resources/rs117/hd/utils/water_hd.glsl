@@ -24,7 +24,9 @@
  */
 #include utils/misc.glsl
 
-vec4 sampleWater(int waterTypeIndex, float depth, vec3 viewDir) {
+vec3 waterNormals;
+
+vec4 sampleWater(int waterTypeIndex, vec3 viewDir) {
     WaterType waterType = getWaterType(waterTypeIndex);
 
     vec2 baseUv = vUv[0].xy * IN.texBlend.x + vUv[1].xy * IN.texBlend.y + vUv[2].xy * IN.texBlend.z;
@@ -50,6 +52,7 @@ vec4 sampleWater(int waterTypeIndex, float depth, vec3 viewDir) {
     n1 = -vec3((n1.x * 2 - 1) * waterType.normalStrength, n1.z, (n1.y * 2 - 1) * waterType.normalStrength);
     n2 = -vec3((n2.x * 2 - 1) * waterType.normalStrength, n2.z, (n2.y * 2 - 1) * waterType.normalStrength);
     vec3 normals = normalize(n1 + n2);
+    waterNormals = normals;
 
     float lightDotNormals = dot(normals, -lightDirection);
     float downDotNormals = -normals.y;
@@ -170,7 +173,7 @@ vec4 sampleWater(int waterTypeIndex, float depth, vec3 viewDir) {
         alpha = max(waterType.baseOpacity, max(foamAmount, max(finalFresnel, length(specularComposite / 3))));
     }
 
-    return vec4(baseColor, alpha); //vec3(translateRange(0, 500, depth))
+    return vec4(baseColor, alpha); //
 }
 
 void sampleUnderwater(inout vec3 outputColor, WaterType waterType, float depth, float lightDotNormals) {

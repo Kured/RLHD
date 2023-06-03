@@ -114,6 +114,36 @@ public class Mat4
 			};
 	}
 
+	public static float[] perspective(float fov, float aspect, float znear, float zfar,  boolean fovIsHorizontal)
+	{
+		float halfSizeX = 0;
+		float halfSizeY = 0;
+		if (fovIsHorizontal) {
+			halfSizeX = znear * (float)Math.tan(fov * Math.PI / 360);
+			halfSizeY = halfSizeX / aspect;
+		} else {
+			halfSizeY = znear * (float)Math.tan(fov * Math.PI / 360);
+			halfSizeX = halfSizeY * aspect;
+		}
+
+		return frustum(-halfSizeX, halfSizeX, -halfSizeY, halfSizeY, znear, zfar);
+	}
+
+	public static float[] frustum(float left, float right, float bottom, float top, float znear, float zfar) {
+		float temp1 = 2 * znear;
+		float temp2 = right - left;
+		float temp3 = top - bottom;
+		float temp4 = zfar - znear;
+
+		return new float[]
+				{
+						temp1 / temp2, 0, 0, 0,
+						0, temp1 / temp3, 0, 0,
+						(right + left) / temp2, (top + bottom) / temp3, (-zfar - znear) / temp4, -1,
+						0, 0, (-temp1 * zfar) / temp4, 0
+				};
+	}
+
 	public static void mul(final float[] a, final float[] b)
 	{
 		final float b00 = b[0 + 0 * 4];

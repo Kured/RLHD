@@ -79,6 +79,8 @@ in FragmentData {
     float fogAmount;
 } IN;
 
+in vec3 gPosition;
+
 out vec4 FragColor;
 
 vec2 worldUvs(float scale) {
@@ -97,6 +99,30 @@ vec2 worldUvs(float scale) {
 #include utils/displacement.glsl
 #include utils/shadows.glsl
 #include utils/water_hd.glsl
+#include utils/hdr.glsl
+
+// Depth Packing
+const vec3 bitShift3 = vec3(65536.0, 256.0, 1.0);
+const vec3 bitMask3  = vec3(0.0, 1.0/256.0, 1.0/256.0);
+float near = 0.01;
+float far  = 2;
+float LinearizeDepth(float depth)
+{
+    float z = depth * 2.0 - 1.0; // back to NDC
+    return (2.0 * near * far) / (far + near - z * (far - near));
+}
+void PackDepth(float depth)
+{
+//    float A = gl_ProjectionMatrix[2].z;
+//    float B = gl_ProjectionMatrix[3].z;
+//    float zNear = - B / (1.0 - A);
+//    float zFar  =   B / (1.0 + A);
+//    float depthN = (depth - zNear)/(zFar - zNear);  // scale to a value in [0, 1]
+//    vec3 depthNPack3 = fract(depthN*bitShift3);
+//    depthNPack3 -= depthNPack3.xxy*bitMask3;
+    //gl_FragData[0] = color;
+    gl_FragDepth = LinearizeDepth(depth); //depthNPack3 vec4(depthNPack3, 1.0); // alpha should equal 1.0 if GL_BLEND is enabled
+}
 
 void main() {
     vec3 camPos = vec3(cameraX, cameraY, cameraZ);
@@ -133,9 +159,11 @@ void main() {
     bool isWater = waterTypeIndex > 0 && !isUnderwater;
 
     vec4 outputColor = vec4(1);
+    vec3 normalOut = vec3(0, 1, 0);
 
     if (isWater) {
-        outputColor = sampleWater(waterTypeIndex, waterDepth, viewDir);
+        outputColor = sampleWater(waterTypeIndex, viewDir);
+        normalOut = waterNormals;
     } else {
         // Source: https://www.geeks3d.com/20130122/normal-mapping-without-precomputed-tangent-space-vectors/
         vec3 N = IN.normal;
@@ -345,6 +373,7 @@ void main() {
         float lightDotNormals = dot(normals, lightDir);
         float downDotNormals = dot(downDir, normals);
         float viewDotNormals = dot(viewDir, normals);
+        normalOut = normals;
 
 
         float shadow = 0;
@@ -481,9 +510,19 @@ void main() {
         vec3 compositeLight = ambientLightOut + lightOut + lightSpecularOut + skyLightOut + lightningOut +
         underglowOut + pointLightsOut + pointLightsSpecularOut + surfaceColorOut;
 
+        // emissive
         float unlit = dot(IN.texBlend, vec3(material1.unlit, material2.unlit, material3.unlit));
         outputColor.rgb *= mix(compositeLight, vec3(1), unlit);
         outputColor.rgb = linearToSrgb(outputColor.rgb);
+
+        // emissive illumination
+        float brightness = length(outputColor.rgb);
+        if (brightness > 0.4) {
+            //emissiveOutput = brightness;
+        }
+        else {
+            //emissiveOutput = vec3(0);
+        }
 
         if (isUnderwater) {
             sampleUnderwater(outputColor.rgb, waterType, waterDepth, lightDotNormals);
@@ -522,9 +561,22 @@ void main() {
         if (isWater) {
             outputColor.a = combinedFog + outputColor.a * (1 - combinedFog);
         }
+//        outputColor.rgb = mix(outputColor.rgb, vec3(1, 0.5, 0.3), combinedFog);
+//        outputColor.rgb = mix(outputColor.rgb, vec3(fogColor.rgb), min(LinearizeDepth(gl_FragCoord.z)*1.4, 1));
 
         outputColor.rgb = mix(outputColor.rgb, fogColor.rgb, combinedFog);
     }
 
+    // View Normals
+    //normalOut = vec3(cross(viewDir, normalOut)); // IN.normal without texture normals, but only vertex normals
+    //normalOut.z = 1 - normalOut.z;
+    //outputColor = vec4( normalOut, 1);
+    // Depth
+    //outputColor + vec4(vec3(1 - LinearizeDepth(gl_FragCoord.z)), 1);
+    // Terrain Only
+    //outputColor + vec4(vec3(vTerrainData[0], vTerrainData[1], vTerrainData[2]), 1);
+
     FragColor = outputColor;
+    gl_FragDepth = gl_FragCoord.z;
 }
+

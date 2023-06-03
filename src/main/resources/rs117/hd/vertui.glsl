@@ -48,6 +48,7 @@ out vec2 TexCoord;
 void main()
 {
     gl_Position = vec4(aPos, 1.0);
+
     TexCoord = aTexCoord;
 
     #if UI_SCALING_MODE == SAMPLING_XBR

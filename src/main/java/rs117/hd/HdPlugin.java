@@ -159,6 +159,7 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 	public static final int TEXTURE_UNIT_UI = GL_TEXTURE0; // default state
 	public static final int TEXTURE_UNIT_GAME = GL_TEXTURE1;
 	public static final int TEXTURE_UNIT_SHADOW_MAP = GL_TEXTURE2;
+	public static final int TEXTURE_UNIT_POSTFX = GL_TEXTURE3;
 
 	// This is the maximum number of triangles the compute shaders support
 	public static final int MAX_TRIANGLE = 6144;
@@ -269,6 +270,14 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 	private static final Shader UNORDERED_COMPUTE_PROGRAM = new Shader()
 		.add(GL_COMPUTE_SHADER, "comp_unordered.glsl");
 
+	private static final Shader POST_PROCESSING_PROGRAM = new Shader()
+			.add(GL_VERTEX_SHADER, "post_processing_vert.glsl")
+			.add(GL_FRAGMENT_SHADER, "post_processing_frag.glsl");
+
+	private static final Shader SKYBOX_PROGRAM = new Shader()
+			.add(GL_VERTEX_SHADER, "sky_vert.glsl")
+			.add(GL_FRAGMENT_SHADER, "sky_frag.glsl");
+
 	private static final Shader UI_PROGRAM = new Shader()
 		.add(GL_VERTEX_SHADER, "vertui.glsl")
 		.add(GL_FRAGMENT_SHADER, "fragui.glsl");
@@ -281,8 +290,10 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 	private int glLargeComputeProgram;
 	private int glSmallComputeProgram;
 	private int glUnorderedComputeProgram;
+	private int glPostProcessingProgram;
 	private int glUiProgram;
 	private int glShadowProgram;
+	private int glSkyboxProgram;
 
 	private int vaoHandle;
 
@@ -294,6 +305,13 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 
 	private int fboSceneHandle;
 	private int rboSceneHandle;
+
+	// post processing
+	private int fboPostFx;
+	private int rboPostFx;
+	private int texMainDiffuse;
+	private int texMainDepth;
+	private int texMainNormal;
 
 	private int fboShadowMap;
 	private int texShadowMap;
@@ -340,6 +358,7 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 	private int lastStretchedCanvasWidth;
 	private int lastStretchedCanvasHeight;
 	private AntiAliasingMode lastAntiAliasingMode;
+	private int lastPostFxState;
 
 	private int yaw;
 	private int pitch;
@@ -399,6 +418,19 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 	private int uniBlockMaterials;
 	private int uniBlockWaterTypes;
 	private int uniBlockPointLights;
+
+	private int uniPostFxColorBlindnessIntensity;
+	private int uniBaseTexture; // postFx
+	private int uniTime;
+
+	private int uniSkyboxCamera;
+	private int uniSkyboxColor;
+	private int uniSkyboxLightDirection;
+	private int uniSkyboxLightColor;
+	private int uniSkyboxColorBlindnessIntensity;
+	private int uniSkyboxSaturation;
+	private int uniSkyboxContrast;
+	private int uniSkyboxProjectionMatrix;
 
 	// Animation things
 	private long lastFrameTime = System.currentTimeMillis();
@@ -484,6 +516,7 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			{
 				renderBufferOffset = 0;
 				fboSceneHandle = rboSceneHandle = 0; // AA FBO
+				fboPostFx = rboPostFx = 0;
 				fboShadowMap = 0;
 				numModelsUnordered = numModelsSmall = numModelsLarge = 0;
 				elapsedTime = 0;
@@ -608,6 +641,7 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 				lastCanvasWidth = lastCanvasHeight = 0;
 				lastStretchedCanvasWidth = lastStretchedCanvasHeight = 0;
 				lastAntiAliasingMode = null;
+				lastPostFxState = -1;
 
 				modelPusher.startUp();
 				modelOverrideManager.startUp();
@@ -823,6 +857,8 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 
 		glProgram = PROGRAM.compile(template);
 		glUiProgram = UI_PROGRAM.compile(template);
+		glPostProcessingProgram = POST_PROCESSING_PROGRAM.compile(template);
+		glSkyboxProgram = SKYBOX_PROGRAM.compile(template);
 
 		switch (configShadowMode) {
 			case FAST:
@@ -861,6 +897,12 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 
 		glUseProgram(glUiProgram);
 		glUniform1i(uniUiTexture, 0);
+
+		glUseProgram(glSkyboxProgram);
+		//glUniform1i(uniBaseTexture, 0);
+
+		glUseProgram(glPostProcessingProgram);
+		glUniform1i(uniBaseTexture, 0);
 
 		glUseProgram(0);
 	}
@@ -906,6 +948,19 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 		uniTexSourceDimensions = glGetUniformLocation(glUiProgram, "sourceDimensions");
 		uniUiColorBlindnessIntensity = glGetUniformLocation(glUiProgram, "colorBlindnessIntensity");
 		uniUiAlphaOverlay = glGetUniformLocation(glUiProgram, "alphaOverlay");
+
+		uniBaseTexture = glGetUniformLocation(glPostProcessingProgram, "baseTexture");
+		uniTime = glGetUniformLocation(glPostProcessingProgram, "time");
+		uniPostFxColorBlindnessIntensity = glGetUniformLocation(glPostProcessingProgram, "colorBlindnessIntensity");
+
+		uniSkyboxCamera = glGetUniformLocation(glSkyboxProgram, "CameraUniforms");
+		uniSkyboxProjectionMatrix = glGetUniformLocation(glSkyboxProgram, "projectionMatrix");
+		uniSkyboxColor = glGetUniformLocation(glSkyboxProgram, "skyboxColor");
+		uniSkyboxLightDirection = glGetUniformLocation(glSkyboxProgram, "lightDirection");
+		uniSkyboxLightColor = glGetUniformLocation(glSkyboxProgram, "lightColor");
+		uniSkyboxColorBlindnessIntensity = glGetUniformLocation(glSkyboxProgram, "colorBlindnessIntensity");
+		uniSkyboxSaturation = glGetUniformLocation(glSkyboxProgram, "saturation");
+		uniSkyboxContrast = glGetUniformLocation(glSkyboxProgram, "contrast");
 
 		if (computeMode == ComputeMode.OPENGL)
 		{
@@ -962,6 +1017,18 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 		{
 			glDeleteProgram(glUnorderedComputeProgram);
 			glUnorderedComputeProgram = 0;
+		}
+
+		if (glPostProcessingProgram != 0)
+		{
+			glDeleteProgram(glPostProcessingProgram);
+			glPostProcessingProgram = 0;
+		}
+
+		if (glSkyboxProgram != 0)
+		{
+			glDeleteProgram(glSkyboxProgram);
+			glSkyboxProgram = 0;
 		}
 
 		if (glUiProgram != 0)
@@ -1243,6 +1310,95 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 		updateBuffer(hUniformBufferLights, GL_UNIFORM_BUFFER, uniformBufferLights, GL_STREAM_DRAW, CL_MEM_READ_ONLY);
 	}
 
+
+	private void initCubemapSkybox()
+	{
+
+	}
+
+	// Post-processing
+	private void initPostFxFbo(int width, int height)
+	{
+		// Bind shadow map, or dummy 1x1 texture
+		glActiveTexture(TEXTURE_UNIT_POSTFX);
+
+		if (OSType.getOSType() != OSType.MacOS)
+		{
+			final GraphicsConfiguration graphicsConfiguration = clientUI.getGraphicsConfiguration();
+			final AffineTransform transform = graphicsConfiguration.getDefaultTransform();
+
+			width = getScaledValue(transform.getScaleX(), width);
+			height = getScaledValue(transform.getScaleY(), height);
+		}
+
+		// Create and bind the FBO
+		fboPostFx = glGenFramebuffers();
+		glBindFramebuffer(GL_FRAMEBUFFER, fboPostFx);
+
+		// Create texture
+		texMainDiffuse = glGenTextures();
+		glBindTexture(GL_TEXTURE_2D, texMainDiffuse);
+
+		// Create color render buffer
+		rboPostFx = glGenRenderbuffers();
+		glBindRenderbuffer(GL_RENDERBUFFER, rboPostFx);
+		//glRenderbufferStorageMultisample(GL_RENDERBUFFER, aaSamples, GL_RGBA, width, height);
+		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rboPostFx);
+
+
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, 0);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+
+		// Bind texture
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, texMainDiffuse, 0);
+		glDrawBuffer(GL_NONE);
+		glReadBuffer(GL_NONE);
+
+		// Reset
+		glBindFramebuffer(GL_FRAMEBUFFER, awtContext.getFramebuffer(false));
+		glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+		// Reset active texture to UI texture
+		glActiveTexture(TEXTURE_UNIT_UI);
+	}
+
+	private void shutdownPostFxFbo()
+	{
+		if (texMainDiffuse != 0)
+		{
+			glDeleteTextures(texMainDiffuse);
+			texMainDiffuse = 0;
+		}
+
+		if (texMainNormal != 0)
+		{
+			glDeleteTextures(texMainNormal);
+			texMainNormal = 0;
+		}
+
+		if (texMainDepth != 0)
+		{
+			glDeleteTextures(texMainDepth);
+			texMainDepth = 0;
+		}
+
+		if (fboPostFx != 0)
+		{
+			glDeleteFramebuffers(fboPostFx);
+			fboPostFx = 0;
+		}
+
+		if (rboPostFx != 0)
+		{
+			glDeleteRenderbuffers(rboPostFx);
+			rboPostFx = 0;
+		}
+	}
+
+	// AA
 	private void initAAFbo(int width, int height, int aaSamples)
 	{
 		if (OSType.getOSType() != OSType.MacOS)
@@ -1763,33 +1919,47 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			// lazy init textures as they may not be loaded at plugin start.
 			textureManager.ensureTexturesLoaded(textureProvider);
 
-			final int viewportHeight = client.getViewportHeight();
 			final int viewportWidth = client.getViewportWidth();
+			final int viewportHeight = client.getViewportHeight();
 
 			int renderWidthOff = viewportOffsetX;
 			int renderHeightOff = viewportOffsetY;
+			int renderCanvasWidth = canvasWidth;
 			int renderCanvasHeight = canvasHeight;
-			int renderViewportHeight = viewportHeight;
 			int renderViewportWidth = viewportWidth;
+			int renderViewportHeight = viewportHeight;
+
+			boolean canvasStretched = false;
+			boolean useSkybox = config.useSkybox();
 
 			if (client.isStretchedEnabled())
 			{
 				Dimension dim = client.getStretchedDimensions();
+				renderCanvasWidth = dim.width;
 				renderCanvasHeight = dim.height;
 
-				double scaleFactorY = dim.getHeight() / canvasHeight;
 				double scaleFactorX = dim.getWidth()  / canvasWidth;
+				double scaleFactorY = dim.getHeight() / canvasHeight;
 
 				// Pad the viewport a little because having ints for our viewport dimensions can introduce off-by-one errors.
 				final int padding = 1;
 
 				// Ceil the sizes because even if the size is 599.1 we want to treat it as size 600 (i.e. render to the x=599 pixel).
-				renderViewportHeight = (int) Math.ceil(scaleFactorY * (renderViewportHeight)) + padding * 2;
 				renderViewportWidth  = (int) Math.ceil(scaleFactorX * (renderViewportWidth )) + padding * 2;
+				renderViewportHeight = (int) Math.ceil(scaleFactorY * (renderViewportHeight)) + padding * 2;
 
 				// Floor the offsets because even if the offset is 4.9, we want to render to the x=4 pixel anyway.
-				renderHeightOff      = (int) Math.floor(scaleFactorY * (renderHeightOff)) - padding;
 				renderWidthOff       = (int) Math.floor(scaleFactorX * (renderWidthOff )) - padding;
+				renderHeightOff      = (int) Math.floor(scaleFactorY * (renderHeightOff)) - padding;
+			}
+
+			// Check if canvas stretched
+			if (lastStretchedCanvasWidth != renderCanvasWidth
+					|| lastStretchedCanvasHeight != renderCanvasHeight)
+			{
+				canvasStretched = true;
+				lastStretchedCanvasWidth = renderCanvasWidth;
+				lastStretchedCanvasHeight = renderCanvasHeight;
 			}
 
 			// Before reading the SSBOs written to from postDrawScene() we must insert a barrier
@@ -1894,7 +2064,38 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 
 			glDpiAwareViewport(renderWidthOff, renderCanvasHeight - renderViewportHeight - renderHeightOff, renderViewportWidth, renderViewportHeight);
 
+			// Main Program start
 			glUseProgram(glProgram);
+
+			// Setup post-processing
+			final boolean postProcessingEnabled = config.enablePostProcessing();
+			if (postProcessingEnabled)
+			{
+				final Dimension stretchedDimensions = client.getStretchedDimensions();
+
+				final int stretchedCanvasWidth = client.isStretchedEnabled() ? stretchedDimensions.width : canvasWidth;
+				final int stretchedCanvasHeight = client.isStretchedEnabled() ? stretchedDimensions.height : canvasHeight;
+
+				// Re-create fbo
+				if (canvasStretched || lastPostFxState != (postProcessingEnabled ? 1 : 0))
+				{
+					shutdownPostFxFbo();
+
+					// Bind default FBO to check whether anti-aliasing is forced
+					glBindFramebuffer(GL_FRAMEBUFFER, awtContext.getFramebuffer(false));
+					initPostFxFbo(stretchedCanvasWidth, stretchedCanvasHeight);
+
+					lastStretchedCanvasWidth = stretchedCanvasWidth;
+					lastStretchedCanvasHeight = stretchedCanvasHeight;
+				}
+
+				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fboPostFx);
+			}
+			else
+			{
+				shutdownPostFxFbo();
+			}
+			lastPostFxState = (postProcessingEnabled ? 1 : 0);
 
 			// Setup anti-aliasing
 			final AntiAliasingMode antiAliasingMode = config.antiAliasingMode();
@@ -1909,9 +2110,7 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 				final int stretchedCanvasHeight = client.isStretchedEnabled() ? stretchedDimensions.height : canvasHeight;
 
 				// Re-create fbo
-				if (lastStretchedCanvasWidth != stretchedCanvasWidth
-					|| lastStretchedCanvasHeight != stretchedCanvasHeight
-					|| lastAntiAliasingMode != antiAliasingMode)
+				if (canvasStretched || lastAntiAliasingMode != antiAliasingMode)
 				{
 					shutdownAAFbo();
 
@@ -1925,9 +2124,6 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 					log.debug("AA samples: {}, max samples: {}, forced samples: {}", samples, maxSamples, forcedAASamples);
 
 					initAAFbo(stretchedCanvasWidth, stretchedCanvasHeight, samples);
-
-					lastStretchedCanvasWidth = stretchedCanvasWidth;
-					lastStretchedCanvasHeight = stretchedCanvasHeight;
 				}
 
 				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fboSceneHandle);
@@ -1942,12 +2138,32 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 
 			// Clear scene
 			float[] fogColor = hasLoggedIn ? environmentManager.getFogColor() : EnvironmentManager.BLACK_COLOR;
-			for (int i = 0; i < fogColor.length; i++)
-			{
+			for (int i = 0; i < fogColor.length; i++) {
 				fogColor[i] = HDUtils.linearToSrgb(fogColor[i]);
 			}
-			glClearColor(fogColor[0], fogColor[1], fogColor[2], 1f);
+			if (!useSkybox) {
+				glClearColor(fogColor[0], fogColor[1], fogColor[2], 1f);
+			}
+			else {
+				glClearColor(0f, 0f, 0f, 0f);
+			}
 			glClear(GL_COLOR_BUFFER_BIT);
+
+//			// Draw Skybox
+			if (useSkybox && hasLoggedIn)
+			{
+				double lightPitchRadians = Math.toRadians(lightPitch);
+				double lightYawRadians = Math.toRadians(lightYaw);
+				drawSkybox(
+						viewportHeight,
+						viewportWidth,
+						fogColor,
+						(float) (Math.cos(lightPitchRadians) * -Math.sin(lightYawRadians)),
+						(float) -Math.sin(lightPitchRadians),
+						(float) (Math.cos(lightPitchRadians) * -Math.cos(lightYawRadians))
+				);
+				glUseProgram(glProgram);
+			}
 
 			final int drawDistance = getDrawDistance();
 			int fogDepth = config.fogDepth();
@@ -2126,8 +2342,15 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 				glBindFramebuffer(GL_READ_FRAMEBUFFER, awtContext.getFramebuffer(false));
 			}
 
+			drawPostProcessing(renderViewportHeight, renderViewportWidth); // or renderViewportWidth, renderViewportHeight || lastStretchedCanvasWidth
+
 			frameModelInfoMap.clear();
 		}
+
+		// Draw Post Processing
+//		if (textureProvider != null && client.getGameState().getState() >= GameState.LOADING.getState()) {
+//			//drawPostProcessing(canvasHeight, canvasWidth);
+//		}
 
 		// Texture on UI
 		drawUi(overlayColor, canvasHeight, canvasWidth);
@@ -2142,6 +2365,81 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 		glBindFramebuffer(GL_FRAMEBUFFER, awtContext.getFramebuffer(false));
 
 		checkGLErrors();
+	}
+
+	private int textureTest = 0;
+	private void drawPostProcessing(final int canvasHeight, final int canvasWidth)
+	{
+//		glBindFramebuffer(GL_FRAMEBUFFER_EXT,    0 );
+
+		glEnable(GL_BLEND);
+
+		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+		//glBindTexture(GL_TEXTURE_2D, interfaceTexture);
+
+		//glBindFramebuffer(GL_READ_FRAMEBUFFER, fboSceneHandle);
+		//glBindFramebuffer(GL_DRAW_FRAMEBUFFER, awtContext.getFramebuffer(false));
+//		glBindImageTexture(0, texShadowMap, 0, false, 0, GL_READ_WRITE, GL_RGBA8);
+//		glBindTexture(GL_TEXTURE_2D, texShadowMap);
+
+		glUseProgram(glPostProcessingProgram);
+
+		glUniform1f(uniTime, elapsedTime);
+
+//		glActiveTexture(GL_TEXTURE0);
+//		glEnable(GL_TEXTURE_2D);
+		glBindTexture(GL_TEXTURE_2D, texMainDiffuse);
+		glUniform1i(uniBaseTexture, TEXTURE_UNIT_POSTFX);
+		//glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, 1, 1, 0, GL_DEPTH_COMPONENT, GL_FLOAT, 0);
+
+		glBindVertexArray(vaoUiHandle);
+		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+		//glBindTexture(GL_TEXTURE_2D, fboShadowMap);
+		//glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fboSceneHandle);
+
+
+		glBindVertexArray(0);
+		//glBindTexture(GL_TEXTURE_2D, 0);
+		glUseProgram(0);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glDisable(GL_BLEND);
+	}
+
+	private void drawSkybox(final int viewportHeight, final int viewportWidth, final float[] fogColor, final float lightDirX, final float lightDirY, final float lightDirZ)
+	{
+//		glEnable(GL_BLEND);
+//		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+		glUseProgram(glSkyboxProgram);
+
+		// Calculate projection matrix
+		float[] projectionMatrix = Mat4.scale(client.getScale(), client.getScale(), 1);
+		Mat4.mul(projectionMatrix, Mat4.projection(viewportWidth, viewportHeight, 50));
+		Mat4.mul(projectionMatrix, Mat4.rotateX((float) -(Math.PI - pitch * Perspective.UNIT)));
+		Mat4.mul(projectionMatrix, Mat4.rotateY((float) (yaw * Perspective.UNIT)));
+		Mat4.mul(projectionMatrix, Mat4.translate(-client.getCameraX2(), -client.getCameraY2(), -client.getCameraZ2()));
+		glUniformMatrix4fv(uniSkyboxProjectionMatrix, false, projectionMatrix);
+
+		glUniform3f(uniSkyboxColor, fogColor[0], fogColor[1], fogColor[2]);
+		glUniform3f(uniSkyboxLightDirection, lightDirX, lightDirY, lightDirZ);
+
+//		uniSkyboxCamera = glGetUniformLocation(glSkyboxProgram, "CameraUniforms");
+//		uniSkyboxColor = glGetUniformLocation(glSkyboxProgram, "skyboxColor");
+//		uniSkyboxLightDirection = glGetUniformLocation(glSkyboxProgram, "lightDirection");
+//		uniSkyboxLightColor = glGetUniformLocation(glSkyboxProgram, "lightColor");
+//		uniSkyboxColorBlindnessIntensity = glGetUniformLocation(glSkyboxProgram, "colorBlindnessIntensity");
+//		uniSkyboxSaturation = glGetUniformLocation(glSkyboxProgram, "saturation");
+//		uniSkyboxContrast = glGetUniformLocation(glSkyboxProgram, "contrast");
+
+
+		glBindVertexArray(vaoUiHandle);
+		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+		glBindVertexArray(0);
+		glUseProgram(0);
+//		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+//		glDisable(GL_BLEND);
 	}
 
 	private void drawUi(final int overlayColor, final int canvasHeight, final int canvasWidth)

@@ -60,6 +60,12 @@ void main() {
         (materialData >> MATERIAL_FLAG_FLAT_NORMALS & 1) == 1;
 
     gPosition = vec3(vPosition);
+
+    // Funny world effect
+//    vec3 camPos = vec3(cameraX, cameraY, cameraZ);
+//    float dist = length(camPos.xyz - gPosition.xyz) / 800;
+//    gPosition.y += pow(dist, 4);
+
     gUv = vec3(vUv);
     gNormal = flatNormal ? vec3(0) : vNormal.xyz / normalMagnitude;
     gColor = color;
