@@ -82,6 +82,8 @@ in FragmentData {
 in vec3 gPosition;
 
 out vec4 FragColor;
+out vec3 FragNormal;
+//out float FragDepth;
 
 vec2 worldUvs(float scale) {
     vec2 uv = IN.position.xz / (128 * scale);
@@ -577,6 +579,7 @@ void main() {
     //outputColor + vec4(vec3(vTerrainData[0], vTerrainData[1], vTerrainData[2]), 1);
 
     FragColor = outputColor;
-    gl_FragDepth = gl_FragCoord.z;
+    FragNormal = vec3(1, 0, 0); // normalOut;
+    //FragDepth = gl_FragCoord.z;
 }
 

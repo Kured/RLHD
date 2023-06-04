@@ -16,6 +16,7 @@ in vec4 vPosition;
 in vec3 vViewDir;
 
 out vec4 FragColor;
+out vec3 FragNormal;
 
 #define PI 3.141592
 #define iSteps 16
@@ -157,6 +158,7 @@ void main() {
     color.g = pow(color.g, 1.0/2.2);
     color.b = pow(color.b, 1.0/2.2);
     FragColor = vec4(color, 1);
+    FragNormal = vec3(1, 1, 0);
 
     //FragColor = vec4(mix(vec3(0, 0.4, 0.99), skyboxColor, TexCoord.y*4), 1);
 }

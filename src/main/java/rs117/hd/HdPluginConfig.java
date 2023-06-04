@@ -677,8 +677,8 @@ public interface HdPluginConfig extends Config
 			keyName = "enablePostProcessing",
 			name = "Enable Post Processing",
 			description = "Enables post processing effects.",
-			warning =
-					"This setting may cause decreased performance.",
+//			warning =
+//					"This setting may cause decreased performance.",
 			position = 1,
 			section = postprocessingSettings
 	)
