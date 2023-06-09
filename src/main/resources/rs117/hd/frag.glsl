@@ -29,11 +29,13 @@
 #include uniforms/materials.glsl
 #include uniforms/water_types.glsl
 #include uniforms/lights.glsl
+#include skybox/sky.glsl
 
 #include MATERIAL_CONSTANTS
 
 uniform sampler2DArray textureArray;
 uniform sampler2D shadowMap;
+uniform samplerCube cubemapTexture;
 
 uniform mat4 lightProjectionMatrix;
 uniform float elapsedTime;
@@ -81,9 +83,11 @@ in FragmentData {
 
 in vec3 gPosition;
 
-out vec4 FragColor;
-out vec3 FragNormal;
-//out float FragDepth;
+// Color attachments
+layout(location = 0) out vec4 FragColor;       // Diffuse color output
+layout(location = 1) out vec4 FragNormal;      // Normal output
+layout(location = 2) out vec4 FragOcclusion;   // Occlusion output
+layout(location = 3) out vec4 FragDepth;       // Depth output
 
 vec2 worldUvs(float scale) {
     vec2 uv = IN.position.xz / (128 * scale);
@@ -103,6 +107,7 @@ vec2 worldUvs(float scale) {
 #include utils/water_hd.glsl
 #include utils/hdr.glsl
 
+// ADDED - Move to another script
 // Depth Packing
 const vec3 bitShift3 = vec3(65536.0, 256.0, 1.0);
 const vec3 bitMask3  = vec3(0.0, 1.0/256.0, 1.0/256.0);
@@ -125,6 +130,10 @@ void PackDepth(float depth)
     //gl_FragData[0] = color;
     gl_FragDepth = LinearizeDepth(depth); //depthNPack3 vec4(depthNPack3, 1.0); // alpha should equal 1.0 if GL_BLEND is enabled
 }
+vec3 cellShading(vec3 value, float numLevels) {
+    return floor(value * numLevels) / numLevels;
+}
+// ADDED END
 
 void main() {
     vec3 camPos = vec3(cameraX, cameraY, cameraZ);
@@ -161,11 +170,17 @@ void main() {
     bool isWater = waterTypeIndex > 0 && !isUnderwater;
 
     vec4 outputColor = vec4(1);
-    vec3 normalOut = vec3(0, 1, 0);
+    vec3 outputNormal = vec3(0, 1, 0);
+    float outputDepth = gl_FragCoord.z;
+    float outputEmissive = 0;
+    float outputShadow = 0;
 
     if (isWater) {
         outputColor = sampleWater(waterTypeIndex, viewDir);
-        normalOut = waterNormals;
+        outputNormal = waterNormals;
+
+        // add cubemap reflection
+        outputColor.rgb = renderCubemap(cubemapTexture, reflect(viewDir, outputNormal), lightDirection.xyz).rgb;
     } else {
         // Source: https://www.geeks3d.com/20130122/normal-mapping-without-precomputed-tangent-space-vectors/
         vec3 N = IN.normal;
@@ -275,6 +290,8 @@ void main() {
 
             underlayBlend = IN.texBlend;
             overlayBlend = IN.texBlend;
+            underlayBlend = clamp(underlayBlend, 0, 1);
+            overlayBlend = clamp(overlayBlend, 0, 1);
         }
         else
         {
@@ -284,10 +301,12 @@ void main() {
             float underlayBlendMultiplier = 1.0 / (underlayBlend[0] + underlayBlend[1] + underlayBlend[2]);
             // adjust back to 1.0 total
             underlayBlend *= underlayBlendMultiplier;
+            underlayBlend = clamp(underlayBlend, 0, 1);
 
             float overlayBlendMultiplier = 1.0 / (overlayBlend[0] + overlayBlend[1] + overlayBlend[2]);
             // adjust back to 1.0 total
             overlayBlend *= overlayBlendMultiplier;
+            overlayBlend = clamp(overlayBlend, 0, 1);
         }
 
 
@@ -365,6 +384,7 @@ void main() {
         }
 
         outputColor = mix(underlayColor, overlayColor, overlayMix);
+        //outputColor = vec4(vUv[1].x, vUv[1].y, 0, 1);
 
         // normals
         vec3 n1 = sampleNormalMap(material1, uv1, IN.normal, TBN);
@@ -375,7 +395,7 @@ void main() {
         float lightDotNormals = dot(normals, lightDir);
         float downDotNormals = dot(downDir, normals);
         float viewDotNormals = dot(viewDir, normals);
-        normalOut = normals;
+        outputNormal = normals;
 
 
         float shadow = 0;
@@ -383,6 +403,7 @@ void main() {
             shadow = sampleShadowMap(fragPos, waterTypeIndex, vec2(0), lightDotNormals);
         shadow = max(shadow, selfShadowing);
         float inverseShadow = 1 - shadow;
+        outputShadow = shadow;
 
 
 
@@ -413,6 +434,11 @@ void main() {
 
         // ambient light
         vec3 ambientLightOut = ambientColor * ambientStrength;
+
+        vec3 radiance = renderCubemap(cubemapTexture, reflect(-lightDirection, outputNormal), lightDirection).rgb;
+//        radiance = radiance / (radiance + vec3(1.0));
+//        radiance = pow(radiance, vec3(1.0/2.2));
+        ambientLightOut = radiance;
 
         float aoFactor =
             IN.texBlend.x * (material1.ambientOcclusionMap == -1 ? 1 : texture(textureArray, vec3(uv1, material1.ambientOcclusionMap)).r) +
@@ -481,7 +507,6 @@ void main() {
             }
         }
 
-
         // sky light
         vec3 skyLightColor = fogColor.rgb;
         float skyLightStrength = 0.5;
@@ -507,6 +532,69 @@ void main() {
         vec3 surfaceColor = vec3(0);
         vec3 surfaceColorOut = surfaceColor * max(combinedSpecularStrength, 0.2);
 
+        // Toon Shading
+        bool enableToonShading = false;
+        if (enableToonShading) {
+            // Calculate the toon shading value based on the length of pointLightsOut and pointLightsSpecularOut
+            float toonSteps = 4.0;  // Number of shading steps
+            float toonShadingFactor = 1.2;  // Toon shading strength
+
+
+            float pointLightsOutLength = length(pointLightsOut);
+            float toonShadingOut = floor(pointLightsOutLength * toonSteps) / toonSteps;
+
+            float pointLightsSpecularOutLength = length(pointLightsSpecularOut);
+            float toonShadingSpecularOut = floor(pointLightsSpecularOutLength * toonSteps) / toonSteps;
+
+            float skyLightOutLength = length(skyLightOut);
+            float toonSkyLightOut = floor(skyLightOutLength * toonSteps) / toonSteps;
+
+            float lightningOutLength = length(lightningOut);
+            float toonLightningOut = floor(lightningOutLength * toonSteps) / toonSteps;
+
+            float underglowOutLength = length(underglowOut);
+            float toonUnderglowOut = floor(underglowOutLength * toonSteps) / toonSteps;
+
+            float ambientLightOutLength = length(ambientLightOut);
+            float toonAmbientLightOut = floor(ambientLightOutLength * toonSteps) / toonSteps;
+
+            float lightOutLength = length(lightOut);
+            float toonLightOut = floor(lightOutLength * toonSteps) / toonSteps;
+
+            float surfaceColorOutLength = length(surfaceColorOut);
+            float toonSurfaceColorOut = floor(surfaceColorOutLength * toonSteps) / toonSteps;
+
+            // Apply cell shading using a step function
+            float cellShadeOut = ceil(toonShadingOut - 0.5);
+            float cellShadeSpecularOut = ceil(toonShadingSpecularOut - 0.5);
+            float cellShadeSkyLightOut = ceil(toonSkyLightOut - 0.5);
+            float cellShadeLightningOut = ceil(toonLightningOut - 0.5);
+            float cellShadeUnderglowOut = ceil(toonUnderglowOut - 0.5);
+            float cellShadeAmbientLightOut = ceil(toonAmbientLightOut - 0.5);
+            float cellShadeLightOut = ceil(toonLightOut - 0.5);
+            float cellShadeSurfaceColorOut = ceil(toonSurfaceColorOut - 0.5);
+
+            // Normalize the cell shading values
+            float maxCellShadeValue = ceil(toonSteps - 0.5);
+            cellShadeOut /= maxCellShadeValue;
+            cellShadeSpecularOut /= maxCellShadeValue;
+            cellShadeSkyLightOut /= maxCellShadeValue;
+            cellShadeLightningOut /= maxCellShadeValue;
+            cellShadeUnderglowOut /= maxCellShadeValue;
+            cellShadeAmbientLightOut /= maxCellShadeValue;
+            cellShadeLightOut /= maxCellShadeValue;
+            cellShadeSurfaceColorOut /= maxCellShadeValue;
+
+            // Apply the toon shading effect to pointLightsOut and pointLightsSpecularOut
+            pointLightsOut *= cellShadeOut * toonShadingFactor;
+            pointLightsSpecularOut *= cellShadeSpecularOut * toonShadingFactor;
+            skyLightOut *= cellShadeSkyLightOut * toonShadingFactor;
+            lightningOut *= cellShadeLightningOut * toonShadingFactor;
+            underglowOut *= cellShadeUnderglowOut * toonShadingFactor;
+            //ambientLightOut *= cellShadeAmbientLightOut * toonShadingFactor;
+            lightOut *= cellShadeLightOut * toonShadingFactor;
+            surfaceColorOut *= cellShadeSurfaceColorOut * toonShadingFactor;
+        }
 
         // apply lighting
         vec3 compositeLight = ambientLightOut + lightOut + lightSpecularOut + skyLightOut + lightningOut +
@@ -516,15 +604,7 @@ void main() {
         float unlit = dot(IN.texBlend, vec3(material1.unlit, material2.unlit, material3.unlit));
         outputColor.rgb *= mix(compositeLight, vec3(1), unlit);
         outputColor.rgb = linearToSrgb(outputColor.rgb);
-
-        // emissive illumination
-        float brightness = length(outputColor.rgb);
-        if (brightness > 0.4) {
-            //emissiveOutput = brightness;
-        }
-        else {
-            //emissiveOutput = vec3(0);
-        }
+        outputEmissive = unlit;
 
         if (isUnderwater) {
             sampleUnderwater(outputColor.rgb, waterType, waterDepth, lightDotNormals);
@@ -563,10 +643,11 @@ void main() {
         if (isWater) {
             outputColor.a = combinedFog + outputColor.a * (1 - combinedFog);
         }
+
 //        outputColor.rgb = mix(outputColor.rgb, vec3(1, 0.5, 0.3), combinedFog);
 //        outputColor.rgb = mix(outputColor.rgb, vec3(fogColor.rgb), min(LinearizeDepth(gl_FragCoord.z)*1.4, 1));
 
-        outputColor.rgb = mix(outputColor.rgb, fogColor.rgb, combinedFog);
+        outputColor.rgb = mix(outputColor.rgb, renderCubemap(cubemapTexture, gPosition.xyz, lightDirection).rgb, combinedFog); // texture(cubemapTexture, viewDir.xyz).rgba
     }
 
     // View Normals
@@ -578,8 +659,21 @@ void main() {
     // Terrain Only
     //outputColor + vec4(vec3(vTerrainData[0], vTerrainData[1], vTerrainData[2]), 1);
 
-    FragColor = outputColor;
-    FragNormal = vec3(1, 0, 0); // normalOut;
-    //FragDepth = gl_FragCoord.z;
-}
+    // Normalize the normal vector
+//    vec3 normalizedNormal = normalize(outputNormal);
+//
+//    // Calculate the dot product between the view direction and the normalized normal
+//    float dotProduct = dot(normalizedNormal, normalize(viewDir));
+//
+//    // Use the dot product to modify the normal vector
+//    vec3 modifiedNormal = mix(normalizedNormal, -normalizedNormal, dotProduct);
+//
+    if (isTerrain)
+        FragColor = vec4(vec3(outputColor.rgb), outputColor.a); //outputColor;
 
+    FragNormal = vec4(outputNormal, 1);
+    if (outputColor.a > 0.3) {
+        FragDepth = vec4(outputDepth, (1 - outputShadow * 0.5), outputEmissive, 1); // dot(reflect(-lightDir, outputNormal), viewDir) // 1 - (abs(IN.position.y) / 1000) , dot(reflect(-lightDir, outputNormal), viewDir) // outputShadow
+        FragOcclusion = vec4(outputShadow, isTerrain, 0, 1);
+    }
+}

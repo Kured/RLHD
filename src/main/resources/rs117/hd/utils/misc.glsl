@@ -69,3 +69,18 @@ float pointToLine(vec2 lineA, vec2 lineB, vec2 point)
         return t;
     }
 }
+
+vec3 rotateVectorY(vec3 v, float angle)
+{
+    float c = cos(angle);
+    float s = sin(angle);
+
+    mat3 rotationMatrix = mat3(
+    c, 0, -s,
+    0, 1, 0,
+    s, 0, c
+    );
+
+    return rotationMatrix * v;
+}
+

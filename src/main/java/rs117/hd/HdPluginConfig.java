@@ -669,7 +669,7 @@ public interface HdPluginConfig extends Config
 			name = "Post Processing",
 			description = "Post Processing settings",
 			position = 4,
-			closedByDefault = true
+			closedByDefault = false
 	)
 	String postprocessingSettings = "postprocessingSettings";
 

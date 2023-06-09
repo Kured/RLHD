@@ -52,20 +52,21 @@ void main() {
     vec4 color = vec4(srgbToLinear(rgb), alpha);
     // CAUTION: only 24-bit ints can be stored safely as floats
     int materialData = int(vUv.w);
-    int terrainData = int(vNormal.w);
+    int terrainData = int(vNormal.w );
 
     float normalMagnitude = length(vNormal.xyz);
     bool flatNormal = // Flat normals must be applied separately per vertex
         normalMagnitude == 0 ||
         (materialData >> MATERIAL_FLAG_FLAT_NORMALS & 1) == 1;
 
-    gPosition = vec3(vPosition);
 
     // Funny world effect
+//    gPosition = vec3(vPosition);
 //    vec3 camPos = vec3(cameraX, cameraY, cameraZ);
 //    float dist = length(camPos.xyz - gPosition.xyz) / 800;
 //    gPosition.y += pow(dist, 4);
 
+    gPosition = vec3(vPosition);
     gUv = vec3(vUv);
     gNormal = flatNormal ? vec3(0) : vNormal.xyz / normalMagnitude;
     gColor = color;

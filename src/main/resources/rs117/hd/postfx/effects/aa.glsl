@@ -8,7 +8,7 @@ uniform float FXAA_REDUCE_MUL = 1.0/8.0;
 #define FxaaTexLod0(t, p) textureLod(t, p, 0.0)
 #define FxaaTexOff(t, p, o, r) textureLodOffset(t, p, 0.0, o)
 
-vec3 aaFXAA(sampler2D tex, vec2 texCoord, vec2 texCoordAA, vec2 rcpFrame)
+void aaFXAA(inout vec4 color, sampler2D tex, vec2 texCoord, vec2 texCoordAA, vec2 rcpFrame)
 {
     /*---------------------------------------------------------*/
     #define FXAA_REDUCE_MIN   (1.0/128.0)
@@ -50,10 +50,23 @@ vec3 aaFXAA(sampler2D tex, vec2 texCoord, vec2 texCoordAA, vec2 rcpFrame)
     FxaaTexLod0(tex, texCoord + dir * (0.0/3.0 - 0.5)).xyz +
     FxaaTexLod0(tex, texCoord + dir * (3.0/3.0 - 0.5)).xyz);
     float lumaB = dot(rgbB, luma);
-    if((lumaB < lumaMin) || (lumaB > lumaMax)) return rgbA;
-    return rgbB;
+    if((lumaB < lumaMin) || (lumaB > lumaMax))
+        color.rgb = rgbA;
+    else
+        color.rgb = rgbB;
 }
 
+// SMAA
+//uniform float SMAA_THRESHOLD = 0.1;
+//uniform float SMAA_MAX_SEARCH_STEPS = 16;
+//uniform float SMAA_MAX_SEARCH_STEPS_DIAG = 8;
+//uniform float SMAA_CORNER_ROUNDING = 25.0;
+void SMAA(sampler2D tex, vec2 texCoord, vec2 texCoordAA, vec2 rcpFrame)
+{
+    // render smaa
+    vec4 color = vec4(0.0);
+
+}
 void aaSMAA(inout vec4 color)
 {
 

@@ -43,6 +43,7 @@ import java.nio.IntBuffer;
 import java.time.LocalDate;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import javax.annotation.Nonnull;
@@ -90,7 +91,6 @@ import net.runelite.rlawt.AWTContext;
 import org.jocl.CL;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL;
-import org.lwjgl.opengl.GL30;
 import org.lwjgl.opengl.GLCapabilities;
 import org.lwjgl.opengl.GLUtil;
 import org.lwjgl.system.Callback;
@@ -111,13 +111,7 @@ import rs117.hd.opengl.compute.OpenCLManager;
 import rs117.hd.opengl.shader.Shader;
 import rs117.hd.opengl.shader.ShaderException;
 import rs117.hd.opengl.shader.Template;
-import rs117.hd.scene.EnvironmentManager;
-import rs117.hd.scene.LightManager;
-import rs117.hd.scene.ModelOverrideManager;
-import rs117.hd.scene.ProceduralGenerator;
-import rs117.hd.scene.SceneContext;
-import rs117.hd.scene.SceneUploader;
-import rs117.hd.scene.TextureManager;
+import rs117.hd.scene.*;
 import rs117.hd.scene.lights.SceneLight;
 import rs117.hd.scene.model_overrides.ModelOverride;
 import rs117.hd.scene.model_overrides.ObjectType;
@@ -154,13 +148,26 @@ import static rs117.hd.utils.ResourcePath.path;
 @Slf4j
 public class HdPlugin extends Plugin implements DrawCallbacks
 {
+
+	private int debugCameraX;
+	private int debugCameraY;
+	private int debugCameraZ;
+	private float debugRotateX;
+	private float debugRotateY;
+	private int debugScaleY;
+	private int debugViewportWidth;
+	private int debugViewportHeight;
+
 	public static final String DISCORD_URL = "https://discord.gg/U4p6ChjgSE";
 	public static final String RUNELITE_URL = "https://runelite.net";
 
 	public static final int TEXTURE_UNIT_UI = GL_TEXTURE0; // default state
 	public static final int TEXTURE_UNIT_GAME = GL_TEXTURE1;
 	public static final int TEXTURE_UNIT_SHADOW_MAP = GL_TEXTURE2;
-	public static final int TEXTURE_UNIT_POSTFX = GL_TEXTURE3;
+	public static final int TEXTURE_UNIT_POSTFX_BASE = GL_TEXTURE3;
+	public static final int TEXTURE_UNIT_POSTFX_NORMAL = GL_TEXTURE4;
+	public static final int TEXTURE_UNIT_POSTFX_OCCLUSION = GL_TEXTURE5;
+	public static final int TEXTURE_UNIT_POSTFX_DEPTH = GL_TEXTURE6;
 
 	// This is the maximum number of triangles the compute shaders support
 	public static final int MAX_TRIANGLE = 6144;
@@ -204,6 +211,8 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 
 	@Inject
 	private EnvironmentManager environmentManager;
+	@Inject
+	private SkyboxManager skyboxManager;
 
 	@Inject
 	private ModelOverrideManager modelOverrideManager;
@@ -229,6 +238,9 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 
 	@Inject
 	private HdPluginConfig config;
+
+	@Inject
+	private PostFx postFx;
 
 	@Inject
 	private Gson rlGson;
@@ -276,8 +288,8 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			.add(GL_FRAGMENT_SHADER, "postfx/post_processing_frag.glsl");
 
 	private static final Shader SKYBOX_PROGRAM = new Shader()
-			.add(GL_VERTEX_SHADER, "sky_vert.glsl")
-			.add(GL_FRAGMENT_SHADER, "sky_frag.glsl");
+			.add(GL_VERTEX_SHADER, "skybox/sky_vert.glsl")
+			.add(GL_FRAGMENT_SHADER, "skybox/sky_frag.glsl");
 
 	private static final Shader UI_PROGRAM = new Shader()
 		.add(GL_VERTEX_SHADER, "vertui.glsl")
@@ -308,15 +320,16 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 	private int rboSceneHandle;
 
 	// post processing
+	private int lastPostFxState;
 	private int fboPostFx;
 	private int rboPostFx;
 	private int vaoPostFxHandle;
 	private int vboPostFxHandle;
 	private int texMainDiffuse;
 	private int texMainNormal;
+	private int texMainOcclusion;
 	private int texMainDepth;
-
-
+	private int texPreviousFrame;
 	private int fboShadowMap;
 	private int texShadowMap;
 
@@ -362,7 +375,7 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 	private int lastStretchedCanvasWidth;
 	private int lastStretchedCanvasHeight;
 	private AntiAliasingMode lastAntiAliasingMode;
-	private int lastPostFxState;
+
 
 	private int yaw;
 	private int pitch;
@@ -398,6 +411,7 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 	private int uniUnderwaterCaustics;
 	private int uniUnderwaterCausticsColor;
 	private int uniUnderwaterCausticsStrength;
+	private int getUniCubemapTexture;
 
 	// Shadow program uniforms
 	private int uniShadowLightProjectionMatrix;
@@ -424,15 +438,22 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 	private int uniBlockPointLights;
 
 	private int uniPostFxColorBlindnessIntensity;
+	private int uniPostFxLightDirection;
+	private int uniPostFxLightProjectionMatrix;
 	private int uniBaseTexture; // postFx
 	private int uniNormalTexture;
+	private int uniOcclusionTexture;
 	private int uniDepthTexture;
+	private int uniPostFxShadowMapTexture;
+	private int uniPostFxPreviousFrameTexture;
 	private int uniWidth;
 	private int uniHeight;
 	private int uniTime;
 
 	private int uniSkyboxCamera;
 	private int uniSkyboxColor;
+	private int uniSkyboxCubemapTexture;
+	private int uniSkyboxViewDirection;
 	private int uniSkyboxLightDirection;
 	private int uniSkyboxLightColor;
 	private int uniSkyboxColorBlindnessIntensity;
@@ -445,6 +466,14 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 
 	// Generic scalable animation timer used in shaders
 	private float elapsedTime;
+
+
+	// Post Processing
+	private float[] postFxBaseClearColor = { 0f, 0f, 0f, 0f };
+	private float[] postFxNormalClearColor = { 0.5f, 0.5f, 1.0f, 1.0f };
+	private float[] postFxOcclusionClearColor = { 0f, 1f, 0f, 1.0f };
+	private float[] postFxDepthClearColor = { 1f, 0f, 0f, 1f };
+
 
 	private int gameTicksUntilSceneReload = 0;
 
@@ -698,12 +727,14 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			if (lwjglInitted)
 			{
 				textureManager.shutDown();
+				skyboxManager.shutDown();
 
 				shutdownBuffers();
 				shutdownInterfaceTexture();
 				shutdownPrograms();
 				shutdownVao();
 				shutdownAAFbo();
+				shutdownPostFxFbo();
 				shutdownShadowMapFbo();
 			}
 
@@ -865,8 +896,8 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 
 		glProgram = PROGRAM.compile(template);
 		glUiProgram = UI_PROGRAM.compile(template);
-		glPostProcessingProgram = POST_PROCESSING_PROGRAM.compile(template);
 		glSkyboxProgram = SKYBOX_PROGRAM.compile(template);
+		glPostProcessingProgram = POST_PROCESSING_PROGRAM.compile(template);
 
 		switch (configShadowMode) {
 			case FAST:
@@ -907,12 +938,11 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 		glUniform1i(uniUiTexture, 0);
 
 		glUseProgram(glSkyboxProgram);
-		//glUniform1i(uniBaseTexture, 0);
 
 		glUseProgram(glPostProcessingProgram);
-		glUniform1i(uniBaseTexture, 0);
-		glUniform1i(uniNormalTexture, 1);
-		glUniform1i(uniDepthTexture, 2);
+		glUniform1i(uniBaseTexture, 3);
+		glUniform1i(uniNormalTexture, 4);
+		glUniform1i(uniDepthTexture, 5);
 		glValidateProgram(glPostProcessingProgram);
 		if (glGetProgrami(glPostProcessingProgram, GL_VALIDATE_STATUS) == GL_FALSE)
 		{
@@ -958,29 +988,37 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 		uniUnderwaterCausticsStrength = glGetUniformLocation(glProgram, "underwaterCausticsStrength");
 		uniTextureArray = glGetUniformLocation(glProgram, "textureArray");
 		uniElapsedTime = glGetUniformLocation(glProgram, "elapsedTime");
+		getUniCubemapTexture = glGetUniformLocation(glProgram, "cubemapTexture");
+
+		uniBaseTexture = glGetUniformLocation(glPostProcessingProgram, "uBaseTexture");
+		uniNormalTexture = glGetUniformLocation(glPostProcessingProgram, "uNormalTexture");
+		uniOcclusionTexture = glGetUniformLocation(glPostProcessingProgram, "uOcclusionTexture");
+		uniDepthTexture = glGetUniformLocation(glPostProcessingProgram, "uDepthTexture");
+		uniPostFxShadowMapTexture = glGetUniformLocation(glPostProcessingProgram, "uShadowMapTexture");
+		uniPostFxPreviousFrameTexture = glGetUniformLocation(glPostProcessingProgram, "uTexPreviousFrame");
+		uniWidth = glGetUniformLocation(glPostProcessingProgram, "uWidth");
+		uniHeight = glGetUniformLocation(glPostProcessingProgram, "uHeight");
+		uniTime = glGetUniformLocation(glPostProcessingProgram, "time");
+		uniPostFxColorBlindnessIntensity = glGetUniformLocation(glPostProcessingProgram, "colorBlindnessIntensity");
+		uniPostFxLightDirection = glGetUniformLocation(glPostProcessingProgram, "uLightDirection");
+		uniPostFxLightProjectionMatrix = glGetUniformLocation(glPostProcessingProgram, "uLightProjectionMatrix");
+
+		uniSkyboxCamera = glGetUniformBlockIndex(glSkyboxProgram, "CameraUniforms");
+		uniSkyboxProjectionMatrix = glGetUniformLocation(glSkyboxProgram, "projectionMatrix");
+		uniSkyboxColor = glGetUniformLocation(glSkyboxProgram, "skyboxColor");
+		uniSkyboxCubemapTexture = glGetUniformLocation(glSkyboxProgram, "cubemapTexture");
+		uniSkyboxViewDirection = glGetUniformLocation(glSkyboxProgram, "viewDirection");
+		uniSkyboxLightDirection = glGetUniformLocation(glSkyboxProgram, "lightDirection");
+		uniSkyboxLightColor = glGetUniformLocation(glSkyboxProgram, "lightColor");
+		uniSkyboxColorBlindnessIntensity = glGetUniformLocation(glSkyboxProgram, "colorBlindnessIntensity");
+		uniSkyboxSaturation = glGetUniformLocation(glSkyboxProgram, "saturation");
+		uniSkyboxContrast = glGetUniformLocation(glSkyboxProgram, "contrast");
 
 		uniUiTexture = glGetUniformLocation(glUiProgram, "uiTexture");
 		uniTexTargetDimensions = glGetUniformLocation(glUiProgram, "targetDimensions");
 		uniTexSourceDimensions = glGetUniformLocation(glUiProgram, "sourceDimensions");
 		uniUiColorBlindnessIntensity = glGetUniformLocation(glUiProgram, "colorBlindnessIntensity");
 		uniUiAlphaOverlay = glGetUniformLocation(glUiProgram, "alphaOverlay");
-
-		uniBaseTexture = glGetUniformLocation(glPostProcessingProgram, "baseTexture");
-		uniNormalTexture = glGetUniformLocation(glPostProcessingProgram, "normalTexture");
-		uniDepthTexture = glGetUniformLocation(glPostProcessingProgram, "depthTexture");
-		uniWidth = glGetUniformLocation(glPostProcessingProgram, "uWidth");
-		uniHeight = glGetUniformLocation(glPostProcessingProgram, "uHeight");
-		uniTime = glGetUniformLocation(glPostProcessingProgram, "time");
-		uniPostFxColorBlindnessIntensity = glGetUniformLocation(glPostProcessingProgram, "colorBlindnessIntensity");
-
-		uniSkyboxCamera = glGetUniformLocation(glSkyboxProgram, "CameraUniforms");
-		uniSkyboxProjectionMatrix = glGetUniformLocation(glSkyboxProgram, "projectionMatrix");
-		uniSkyboxColor = glGetUniformLocation(glSkyboxProgram, "skyboxColor");
-		uniSkyboxLightDirection = glGetUniformLocation(glSkyboxProgram, "lightDirection");
-		uniSkyboxLightColor = glGetUniformLocation(glSkyboxProgram, "lightColor");
-		uniSkyboxColorBlindnessIntensity = glGetUniformLocation(glSkyboxProgram, "colorBlindnessIntensity");
-		uniSkyboxSaturation = glGetUniformLocation(glSkyboxProgram, "saturation");
-		uniSkyboxContrast = glGetUniformLocation(glSkyboxProgram, "contrast");
 
 		if (computeMode == ComputeMode.OPENGL)
 		{
@@ -1005,6 +1043,8 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			case FAST:
 				uniShadowLightProjectionMatrix = glGetUniformLocation(glShadowProgram, "lightProjectionMatrix");
 		}
+
+		glUseProgram(0);
 
 		// Initialize uniform buffers that may depend on compile-time settings
 		initCameraUniformBuffer();
@@ -1115,7 +1155,7 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 
-		// Post Processing VAO/VBO
+		// Post Processing VAO/VBO move to post fx
 		FloatBuffer quadBuf = BufferUtils.createFloatBuffer(5 * 4);
 		quadBuf.put(new float[]{
 				// Positions     		// Texture Coordinates
@@ -1139,8 +1179,8 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 		glBindBuffer(GL_ARRAY_BUFFER, vboPostFxHandle);
 
 		// Set up vertex attribute pointers
-		int positionAttrib = glGetAttribLocation(glPostProcessingProgram, "position");
-		int texCoordAttrib = glGetAttribLocation(glPostProcessingProgram, "texCoord");
+//		int positionAttrib = glGetAttribLocation(glPostProcessingProgram, "position");
+//		int texCoordAttrib = glGetAttribLocation(glPostProcessingProgram, "texCoord");
 
 		glEnableVertexAttribArray(0);
 		glVertexAttribPointer(0, 3, GL_FLOAT, false, 5 * Float.BYTES, 0);
@@ -1380,71 +1420,91 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 		updateBuffer(hUniformBufferLights, GL_UNIFORM_BUFFER, uniformBufferLights, GL_STREAM_DRAW, CL_MEM_READ_ONLY);
 	}
 
-
-	private void initCubemapSkybox()
-	{
-
-	}
-
 	// Post-processing
 	private void initPostFxFbo(int width, int height)
 	{
-		// Bind PostFX Texture
-		//glActiveTexture(TEXTURE_UNIT_POSTFX);
+		// Scale the width and height for non-retina displays
+		if (OSType.getOSType() != OSType.MacOS)
+		{
+			final GraphicsConfiguration graphicsConfiguration = clientUI.getGraphicsConfiguration();
+			final AffineTransform transform = graphicsConfiguration.getDefaultTransform();
 
-//		if (OSType.getOSType() != OSType.MacOS)
-//		{
-//			final GraphicsConfiguration graphicsConfiguration = clientUI.getGraphicsConfiguration();
-//			final AffineTransform transform = graphicsConfiguration.getDefaultTransform();
-//
-//			width = getScaledValue(transform.getScaleX(), width);
-//			height = getScaledValue(transform.getScaleY(), height);
-//		}
+			width = getScaledValue(transform.getScaleX(), width);
+			height = getScaledValue(transform.getScaleY(), height);
+		}
 
 		// Create and bind the FBO
 		fboPostFx = glGenFramebuffers();
-		glBindFramebuffer(GL_FRAMEBUFFER, fboPostFx); // or bind to aa fbo, as it will apply msaa, choosing a fbo for the textures to be bound to
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fboPostFx); // or bind to aa fbo, as it will apply msaa, choosing a fbo for the textures to be bound to
 
+/*
 		// Create color render buffer
-//		rboPostFx = glGenRenderbuffers();
-//		glBindRenderbuffer(GL_RENDERBUFFER, rboPostFx);
-//		//glRenderbufferStorageMultisample(GL_RENDERBUFFER, aaSamples, GL_RGBA, width, height);
-//		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rboPostFx);
+		rboPostFx = glGenRenderbuffers();
+		glBindRenderbuffer(GL_RENDERBUFFER, rboPostFx);
+		//glRenderbufferStorageMultisample(GL_RENDERBUFFER, aaSamples, GL_RGBA, width, height);
+		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rboPostFx);
+*/
 
 		// Create textures
 		texMainDiffuse = glGenTextures();
-		glActiveTexture(GL_TEXTURE0);
+		glActiveTexture(TEXTURE_UNIT_POSTFX_BASE);
 		glBindTexture(GL_TEXTURE_2D, texMainDiffuse);
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texMainDiffuse, 0); // Color
 
 		texMainNormal = glGenTextures();
-		glActiveTexture(GL_TEXTURE1);
+		glActiveTexture(TEXTURE_UNIT_POSTFX_NORMAL);
 		glBindTexture(GL_TEXTURE_2D, texMainNormal);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, width, height, 0, GL_RGB, GL_FLOAT, 0); // check GL_RGB32F compat
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, width, height, 0, GL_RGB, GL_FLOAT, 0);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, texMainNormal, 0); // Normal
+
+		texMainOcclusion = glGenTextures();
+		glActiveTexture(TEXTURE_UNIT_POSTFX_OCCLUSION);
+		glBindTexture(GL_TEXTURE_2D, texMainOcclusion);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, width, height, 0, GL_RGB, GL_FLOAT, 0);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
 
 		texMainDepth = glGenTextures();
-		glActiveTexture(GL_TEXTURE2);
+		glActiveTexture(TEXTURE_UNIT_POSTFX_DEPTH);
 		glBindTexture(GL_TEXTURE_2D, texMainDepth);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, 0);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, width, height, 0, GL_RGB, GL_FLOAT, 0);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, texMainDepth, 0); // Depth
+
+//		texMainDepth = glGenTextures();
+//		glActiveTexture(TEXTURE_UNIT_POSTFX_DEPTH);
+//		glBindTexture(GL_TEXTURE_2D, texMainDepth);
+//		glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, 0);
+//		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+//		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+//		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+//		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+//		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		//glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, texMainDepth, 0);
+
+		// Attach textures to FBO
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texMainDiffuse, 0);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, texMainNormal, 0);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, texMainOcclusion, 0);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT3, GL_TEXTURE_2D, texMainDepth, 0);
+
 
 		// Set the list of draw buffers
-		int[] drawBuffers = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
-		GL30.glDrawBuffers(drawBuffers);
+		int[] drawBuffers = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3 };
+		//GL30.glDrawBuffers(drawBuffers);
+		glDrawBuffers(drawBuffers);
 
 		// Check framebuffer completeness
 		int framebufferStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
@@ -1482,15 +1542,21 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			log.warn("Framebuffer error: " + errorString);
 		}
 
+		// Create and bind the PBO
+		texPreviousFrame = glGenTextures();
+		glBindTexture(GL_TEXTURE_2D, texPreviousFrame);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
 		// Reset
+		//glBindRenderbuffer(GL_RENDERBUFFER, 0);
 		glBindFramebuffer(GL_FRAMEBUFFER, awtContext.getFramebuffer(false));
-		glBindRenderbuffer(GL_RENDERBUFFER, 0);
 		glBindTexture(GL_TEXTURE_2D, 0);
+		glActiveTexture(GL_TEXTURE0);
 
-		//glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rboPostFx);
-
-		// Reset active texture to UI texture
-		glActiveTexture(TEXTURE_UNIT_UI);
 	}
 
 	private void shutdownPostFxFbo()
@@ -1507,10 +1573,22 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			texMainNormal = 0;
 		}
 
+		if (texMainOcclusion != 0)
+		{
+			glDeleteTextures(texMainOcclusion);
+			texMainOcclusion = 0;
+		}
+
 		if (texMainDepth != 0)
 		{
 			glDeleteTextures(texMainDepth);
 			texMainDepth = 0;
+		}
+
+		if (texPreviousFrame != 0)
+		{
+			glDeleteTextures(texPreviousFrame);
+			texPreviousFrame = 0;
 		}
 
 		if (fboPostFx != 0)
@@ -1524,6 +1602,15 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			glDeleteRenderbuffers(rboPostFx);
 			rboPostFx = 0;
 		}
+	}
+
+	// copy frame function
+	public void postFxCapturePreviousFrame(int srcTex, int destTex, int width, int height) {
+		glBindFramebuffer(GL_FRAMEBUFFER, 0); // Bind the default framebuffer
+		glBindTexture(GL_TEXTURE_2D, srcTex);
+		glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 0, 0, width, height, 0);
+		glBindTexture(GL_TEXTURE_2D, destTex);
+		glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 0, 0, width, height, 0);
 	}
 
 	// AA
@@ -2039,7 +2126,7 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 		}
 
 		glClearColor(0, 0, 0, 1f);
-		glClear(GL_COLOR_BUFFER_BIT);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		// Draw 3d scene
 		final TextureProvider textureProvider = client.getTextureProvider();
@@ -2229,6 +2316,7 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			}
 			else
 			{
+				glDisable(GL_MULTISAMPLE);
 				shutdownAAFbo();
 			}
 			lastAntiAliasingMode = antiAliasingMode;
@@ -2236,7 +2324,7 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			// Setup post-processing
 			if (postProcessingEnabled)
 			{
-				glEnable(GL_MULTISAMPLE);
+				//glEnable(GL_MULTISAMPLE);
 
 				final Dimension stretchedDimensions = client.getStretchedDimensions();
 
@@ -2258,6 +2346,13 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 
 				//glBindFramebuffer(GL_READ_FRAMEBUFFER, awtContext.getFramebuffer(false));
 				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fboPostFx);
+				//glBindFramebuffer(GL_FRAMEBUFFER, fboPostFx);
+
+				// Allow writing to the depth buffer
+				glDepthMask(true);
+				//glDepthFunc(GL_LESS);
+				// allow writing to the color buffer
+				glColorMask(true, true, true, true);
 			}
 			else
 			{
@@ -2267,7 +2362,7 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 
 			// Disable Multisampling
 			if (!postProcessingEnabled && !aaEnabled) {
-				glDisable(GL_MULTISAMPLE);
+				//glDisable(GL_MULTISAMPLE);
 			}
 
 			// Clear scene
@@ -2283,9 +2378,28 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			}
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-//			// Draw Skybox
+			// Clear post-processing color attachment buffers
+			if (postProcessingEnabled) {
+				// Clear the base color attachment
+				//glClearBufferfv(GL_COLOR, 0, postFxBaseClearColor);
+
+				// Clear the normal color attachment
+				glClearBufferfv(GL_COLOR, 1, postFxNormalClearColor);
+
+				// Clear the occlusion color attachment
+				glClearBufferfv(GL_COLOR, 2, postFxOcclusionClearColor);
+
+				// Clear the depth color attachment
+				glClearBufferfv(GL_COLOR, 3, postFxDepthClearColor);
+			}
+
+			// Draw Skybox
 			if (useSkybox && hasLoggedIn)
 			{
+				if (!skyboxManager.isInit) {
+					skyboxManager.init(glSkyboxProgram, glProgram, uniSkyboxCubemapTexture, 0, uniSkyboxCubemapTexture);
+				}
+
 				double lightPitchRadians = Math.toRadians(lightPitch);
 				double lightYawRadians = Math.toRadians(lightYaw);
 				drawSkybox(
@@ -2296,8 +2410,19 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 						(float) -Math.sin(lightPitchRadians),
 						(float) (Math.cos(lightPitchRadians) * -Math.cos(lightYawRadians))
 				);
+
+				// re-bind main program
 				glUseProgram(glProgram);
+
+				// Bind skybox texture to main program
+				glActiveTexture(GL_TEXTURE0);
+				glBindTexture(GL_TEXTURE_CUBE_MAP, skyboxManager.texSkyboxDay);
 			}
+			else
+			{
+				skyboxManager.shutDown();
+			}
+
 
 			final int drawDistance = getDrawDistance();
 			int fogDepth = config.fogDepth();
@@ -2425,14 +2550,6 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			glEnable(GL_CULL_FACE);
 			glCullFace(GL_BACK);
 
-			// Depth Testing
-			if (postProcessingEnabled)
-			{
-				glEnable(GL_DEPTH_TEST);
-				glDepthFunc(GL_LESS);     // Use the default depth comparison function (less than)
-				glDepthMask(true);     // Allow writing to the depth buffer
-			}
-
 			// Enable blending for alpha
 			glEnable(GL_BLEND);
 			glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
@@ -2457,12 +2574,6 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			glDisable(GL_BLEND);
 			glDisable(GL_CULL_FACE);
 
-			// Depth Testing
-			if (postProcessingEnabled)
-			{
-				glDisable(GL_DEPTH_TEST);
-			}
-
 			glUseProgram(0);
 
 			// Render AA
@@ -2480,7 +2591,8 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 					height = getScaledValue(transform.getScaleY(), height);
 				}
 
-				glBindFramebuffer(GL_READ_FRAMEBUFFER, fboSceneHandle); // replace with post process fbo??
+				//glBindFramebuffer(GL_READ_FRAMEBUFFER, fboPostFx);
+				glBindFramebuffer(GL_READ_FRAMEBUFFER, fboSceneHandle);
 				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, awtContext.getFramebuffer(false));
 				glBlitFramebuffer(
 					0, 0, width, height,
@@ -2492,7 +2604,7 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			}
 
 			// Render Post Processing
-			if (postProcessingEnabled)
+			if (postProcessingEnabled && hasLoggedIn)
 			{
 				int width = lastStretchedCanvasWidth;
 				int height = lastStretchedCanvasHeight;
@@ -2506,9 +2618,41 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 					height = getScaledValue(transform.getScaleY(), height);
 				}
 
-				//glBindFramebuffer(GL_FRAMEBUFFER, fboPostFx);
-//				glDpiAwareViewport(renderWidthOff, renderCanvasHeight - renderViewportHeight - renderHeightOff, renderViewportWidth, renderViewportHeight);
-				drawPostProcessing(renderViewportWidth, renderViewportHeight); // or renderViewportWidth, renderViewportHeight || lastStretchedCanvasWidth
+//				glBindFramebuffer(GL_READ_FRAMEBUFFER, fboSceneHandle); // replace with post process fbo??
+//				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, awtContext.getFramebuffer(false));
+//				glBlitFramebuffer(
+//						0, 0, width, height,
+//						0, 0, width, height,
+//						GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+				glBindFramebuffer(GL_FRAMEBUFFER, awtContext.getFramebuffer(false));
+
+				double _lightPitchRadians = Math.toRadians(lightPitch);
+				double _lightYawRadians = Math.toRadians(lightYaw);
+				drawPostFx(renderViewportWidth, renderViewportHeight,
+						(float) (Math.cos(_lightPitchRadians) * -Math.sin(_lightYawRadians)),
+						(float) -Math.sin(_lightPitchRadians),
+						(float) (Math.cos(_lightPitchRadians) * -Math.cos(_lightYawRadians)),
+						projectionMatrix); // or renderViewportWidth, renderViewportHeight || lastStretchedCanvasWidth
+
+				// Ping-pong the textures to capture the previous frame
+				if (texMainDiffuse != 0 && texPreviousFrame != 0)
+				{
+					glBindFramebuffer(GL_FRAMEBUFFER, fboPostFx);
+
+					int tempTex = texMainDiffuse;
+					texMainDiffuse = texPreviousFrame;
+					texPreviousFrame = tempTex;
+
+					// Detach the ping texture from the framebuffer object
+					glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+					// Attach the pong texture to the framebuffer object
+					glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texMainDiffuse, 0);
+
+					glBindFramebuffer(GL_FRAMEBUFFER, awtContext.getFramebuffer(false));
+				}
+
+
 			}
 
 			frameModelInfoMap.clear();
@@ -2531,7 +2675,8 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 		checkGLErrors();
 	}
 
-	private void drawPostProcessing(int width, int height) {
+	private void drawPostFx(int width, int height, final float lightDirX, final float lightDirY, final float lightDirZ, float[] lightProjectionMatrix) {
+		//glUniform2f(uniScreenSpaceSunPos, sunScreenSpacePos[0], sunScreenSpacePos[1]);
 
 //		glEnable(GL_BLEND);
 //		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
@@ -2544,18 +2689,34 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 		glUniform1f(uniTime, elapsedTime);
 		glUniform1f(uniWidth, (float)width);
 		glUniform1f(uniHeight, (float)height);
+		glUniform3f(uniPostFxLightDirection, lightDirX, lightDirY, lightDirZ);
+		glUniformMatrix4fv(uniPostFxLightProjectionMatrix, false, lightProjectionMatrix);
 
-		glActiveTexture(GL_TEXTURE0);
+		glActiveTexture(TEXTURE_UNIT_POSTFX_BASE);
 		glBindTexture(GL_TEXTURE_2D, texMainDiffuse);
-		glUniform1i(uniBaseTexture, 0);
+		glUniform1i(uniBaseTexture, 3);
 
-		glActiveTexture(GL_TEXTURE1);
+		glActiveTexture(TEXTURE_UNIT_POSTFX_NORMAL);
 		glBindTexture(GL_TEXTURE_2D, texMainNormal);
-		glUniform1i(uniNormalTexture, 1);
+		glUniform1i(uniNormalTexture, 4);
 
-		glActiveTexture(GL_TEXTURE2);
+		glActiveTexture(TEXTURE_UNIT_POSTFX_OCCLUSION);
+		glBindTexture(GL_TEXTURE_2D, texMainOcclusion);
+		glUniform1i(uniOcclusionTexture, 5);
+
+		glActiveTexture(TEXTURE_UNIT_POSTFX_DEPTH);
 		glBindTexture(GL_TEXTURE_2D, texMainDepth);
-		glUniform1i(uniDepthTexture, 2);
+		glUniform1i(uniDepthTexture, 6);
+
+		// Make a dependency on the shadow map texture for God Rays
+		glActiveTexture(TEXTURE_UNIT_SHADOW_MAP);
+		glBindTexture(GL_TEXTURE_2D, texShadowMap);
+		glUniform1i(uniPostFxShadowMapTexture, 2);
+
+		// Bind the previous frame texture
+		glActiveTexture(GL_TEXTURE7);
+		glBindTexture(GL_TEXTURE_2D, texPreviousFrame);
+		glUniform1i(uniPostFxPreviousFrameTexture, 7); // Pass the texture unit GL_TEXTURE1
 
 		// Disable blending
 		//glDisable(GL_BLEND);
@@ -2567,53 +2728,16 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 		glBindVertexArray(0);
 		glUseProgram(0);
 		glActiveTexture(GL_TEXTURE0);
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+
+		//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		//glDisable(GL_BLEND);
 	}
-//	private void drawPostProcessing(final int canvasHeight, final int canvasWidth)
-//	{
-////		glBindFramebuffer(GL_FRAMEBUFFER_EXT,    0 );
-//
-//		glEnable(GL_BLEND);
-//
-//		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-//		//glBindTexture(GL_TEXTURE_2D, interfaceTexture);
-//
-//		//glBindFramebuffer(GL_READ_FRAMEBUFFER, fboSceneHandle);
-//		//glBindFramebuffer(GL_DRAW_FRAMEBUFFER, awtContext.getFramebuffer(false));
-////		glBindImageTexture(0, texShadowMap, 0, false, 0, GL_READ_WRITE, GL_RGBA8);
-////		glBindTexture(GL_TEXTURE_2D, texShadowMap);
-//
-//		glUseProgram(glPostProcessingProgram);
-//
-//		glUniform1f(uniTime, elapsedTime);
-//
-//		glActiveTexture(GL_TEXTURE0);
-//		//glEnable(GL_TEXTURE_2D);
-//		glBindTexture(GL_TEXTURE_2D, texMainDiffuse);
-//		glUniform1i(uniBaseTexture, 0);
-//		//glUniform1i(uniBaseTexture, GL_TEXTURE0);
-//		//glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, 1, 1, 0, GL_DEPTH_COMPONENT, GL_FLOAT, 0);
-//
-//		glBindVertexArray(vaoUiHandle);
-//		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-//
-//		//glBindTexture(GL_TEXTURE_2D, fboShadowMap);
-//		//glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fboSceneHandle);
-//
-//
-//		glBindVertexArray(0);
-//		//glBindTexture(GL_TEXTURE_2D, 0);
-//		glUseProgram(glProgram);
-//		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-//		glDisable(GL_BLEND);
-//	}
 
 	private void drawSkybox(final int viewportHeight, final int viewportWidth, final float[] fogColor, final float lightDirX, final float lightDirY, final float lightDirZ)
 	{
 //		glEnable(GL_BLEND);
 //		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-
 		glUseProgram(glSkyboxProgram);
 
 		// Calculate projection matrix
@@ -2621,28 +2745,43 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 		Mat4.mul(projectionMatrix, Mat4.projection(viewportWidth, viewportHeight, 50));
 		Mat4.mul(projectionMatrix, Mat4.rotateX((float) -(Math.PI - pitch * Perspective.UNIT)));
 		Mat4.mul(projectionMatrix, Mat4.rotateY((float) (yaw * Perspective.UNIT)));
-		Mat4.mul(projectionMatrix, Mat4.translate(-client.getCameraX2(), -client.getCameraY2(), -client.getCameraZ2()));
+		//Mat4.mul(projectionMatrix, Mat4.translate(-client.getCameraX2(), -client.getCameraY2(), -client.getCameraZ2()));
 		glUniformMatrix4fv(uniSkyboxProjectionMatrix, false, projectionMatrix);
 
 		glUniform3f(uniSkyboxColor, fogColor[0], fogColor[1], fogColor[2]);
 		glUniform3f(uniSkyboxLightDirection, lightDirX, lightDirY, lightDirZ);
 
-//		uniSkyboxCamera = glGetUniformLocation(glSkyboxProgram, "CameraUniforms");
-//		uniSkyboxColor = glGetUniformLocation(glSkyboxProgram, "skyboxColor");
-//		uniSkyboxLightDirection = glGetUniformLocation(glSkyboxProgram, "lightDirection");
-//		uniSkyboxLightColor = glGetUniformLocation(glSkyboxProgram, "lightColor");
-//		uniSkyboxColorBlindnessIntensity = glGetUniformLocation(glSkyboxProgram, "colorBlindnessIntensity");
-//		uniSkyboxSaturation = glGetUniformLocation(glSkyboxProgram, "saturation");
-//		uniSkyboxContrast = glGetUniformLocation(glSkyboxProgram, "contrast");
+		float yaw = (float)client.getCameraYaw();
+		float pitch = (float)client.getCameraPitch();
+		float pitchRad = (float)Math.toRadians(pitch);
+		float yawRad = (float)Math.toRadians(yaw);
 
+		// Calculate directional vector components
+		float x = (float)Math.cos(yawRad) * (float)Math.cos(pitchRad);
+		float y = (float)Math.sin(yawRad) * (float)Math.cos(pitchRad);
+		float z = (float)Math.sin(pitchRad);
 
+		// Normalize the vector
+		float magnitude = (float)Math.sqrt(x * x + y * y + z * z);
+		float xNormalized = x / magnitude;
+		float yNormalized = y / magnitude;
+		float zNormalized = z / magnitude;
+
+		glUniform3f(uniSkyboxViewDirection, xNormalized, yNormalized, zNormalized);
+		glUniformBlockBinding(glSkyboxProgram, uniSkyboxCamera, 0);
+
+		// bind cubemap
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_CUBE_MAP, skyboxManager.texSkyboxDay);
+
+		// render skybox
 		glBindVertexArray(vaoUiHandle);
 		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
+		// reset
+		glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 		glBindVertexArray(0);
 		glUseProgram(0);
-//		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-//		glDisable(GL_BLEND);
 	}
 
 	private void drawUi(final int overlayColor, final int canvasHeight, final int canvasWidth)
