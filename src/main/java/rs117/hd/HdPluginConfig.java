@@ -559,10 +559,22 @@ public interface HdPluginConfig extends Config
 	}
 
 	@ConfigItem(
+			keyName = "syncWeather3D",
+			name = "Sync Weather3D",
+			description = "Syncs the environment with the Weather3D plugin.",
+			position = 11,
+			section = environmentSettings
+	)
+	default boolean syncWeather3D()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "tzhaarHD",
 		name = "HD TzHaar Reskin",
 		description = "Recolors the TzHaar city of Mor Ul Rek to give it an appearance similar to that of its 2008 HD variant.",
-		position = 11,
+		position = 12,
 		section = environmentSettings
 	)
 	default boolean tzhaarHD()

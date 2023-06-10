@@ -37,10 +37,12 @@ import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import javax.annotation.Nonnull;
@@ -430,6 +432,11 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 
 	@Setter
 	private boolean isInGauntlet = false;
+
+	private float weatherDarkness = 0.0f;
+	private float lightningIntensity = 0.0f;
+	private boolean lightningFlashed = false;
+	private boolean lightningFlashedSecond = false;
 
 	private final Map<Integer, TempModelInfo> frameModelInfoMap = new HashMap<>();
 
@@ -1804,6 +1811,63 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			float[] lightProjectionMatrix = Mat4.identity();
 			float lightPitch = environmentManager.currentLightPitch;
 			float lightYaw = environmentManager.currentLightYaw;
+			float[] fogColor = hasLoggedIn ? environmentManager.getFogColor() : EnvironmentManager.BLACK_COLOR;
+			float lightStrength = environmentManager.currentDirectionalStrength;
+
+			if (config.syncWeather3D() && config.flashingEffects()) {
+				String weather = getWeather();
+				float targetDarknessLevel;
+				switch (weather.toUpperCase()) {
+					case "WEATHER_PARTLY_CLOUDY":
+						targetDarknessLevel = 0.7f;
+						break;
+					case "WEATHER_CLOUDY":
+					case "WEATHER_RAINING":
+						targetDarknessLevel = 0.4f;
+						break;
+					case "WEATHER_STORM":
+						targetDarknessLevel = 0.2f;
+						if (Math.random() < 0.0005) {
+							lightningIntensity = 5f;
+						}
+						break;
+					default:
+						targetDarknessLevel = 1f;
+						break;
+				}
+				weatherDarkness = weatherDarkness + (targetDarknessLevel - weatherDarkness) * 0.003f;
+
+				if (lightningIntensity > 0f && !lightningFlashedSecond) {
+					lightningIntensity -= (Math.random() * 0.4f) + 0.2f;
+					lightningIntensity = Math.max(0f, lightningIntensity);
+					lightningFlashed = true;
+				}
+
+				if (lightningIntensity == 0f && lightningFlashed) {
+					lightningIntensity = 3f;
+					lightningFlashedSecond = true;
+				}
+
+				if (lightningIntensity > 0f && lightningFlashedSecond) {
+					lightningIntensity -= (Math.random() * 0.1f) + 0.005f;
+					lightningIntensity = Math.max(0f, lightningIntensity);
+				}
+
+				if (lightningIntensity == 0f && lightningFlashedSecond && lightningFlashed) {
+					lightningFlashed = false;
+					lightningFlashedSecond = false;
+				}
+
+				float blueIntensity = lightningIntensity / 15f;
+				float redGreenIntensity = lightningIntensity / 60f;
+
+				lightStrength = lightStrength * weatherDarkness + lightningIntensity;
+				fogColor = new float[]{
+						fogColor[0] * weatherDarkness + redGreenIntensity,
+						fogColor[1] * weatherDarkness + redGreenIntensity,
+						fogColor[2] * weatherDarkness + blueIntensity
+				};
+			}
 
 			if (configShadowsEnabled && fboShadowMap != 0 && environmentManager.currentDirectionalStrength > 0.0f)
 			{
@@ -1918,7 +1982,6 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			lastAntiAliasingMode = antiAliasingMode;
 
 			// Clear scene
-			float[] fogColor = hasLoggedIn ? environmentManager.getFogColor() : EnvironmentManager.BLACK_COLOR;
 			for (int i = 0; i < fogColor.length; i++)
 			{
 				fogColor[i] = HDUtils.linearToSrgb(fogColor[i]);
@@ -1980,7 +2043,6 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 			glUniform3f(uniAmbientColor, ambientColor[0], ambientColor[1], ambientColor[2]);
 
 			// get light strength from either the config or the current area
-			float lightStrength = environmentManager.currentDirectionalStrength;
 			lightStrength *= (double)config.brightness() / 20;
 			glUniform1f(uniLightStrength, lightStrength);
 
@@ -2119,6 +2181,33 @@ public class HdPlugin extends Plugin implements DrawCallbacks
 		glBindFramebuffer(GL_FRAMEBUFFER, awtContext.getFramebuffer(false));
 
 		checkGLErrors();
+	}
+
+	private String getWeather() {
+		if (config.syncWeather3D()) {
+			Collection<Plugin> plugins = pluginManager.getPlugins();
+
+			for (Plugin plugin : plugins) {
+				if (plugin.getName().equals("3D Weather")) {
+					if (pluginManager.isPluginEnabled(plugin)) {
+						Class<?> pluginClass = plugin.getClass();
+						try {
+							Field currentWeatherField = pluginClass.getDeclaredField("currentWeather");
+
+							currentWeatherField.setAccessible(true);
+
+							Object currentWeather = currentWeatherField.get(plugin);
+
+							return currentWeather != null ? currentWeather.toString() : "";
+
+						} catch (NoSuchFieldException | IllegalAccessException e) {
+							e.printStackTrace();
+						}
+					}
+				}
+			}
+		}
+		return "";
 	}
 
 	private void drawUi(final int overlayColor, final int canvasHeight, final int canvasWidth)
